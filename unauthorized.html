@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Unauthorized · Organizational Design Tool</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/auth-pages.css" />
+  <link rel="stylesheet" href="css/living.css" />
+</head>
+<body class="login-page">
+
+  <main class="login-card">
+    <img src="logo.png" alt="Azerconnect Group" class="login-logo" />
+
+    <h1>403 · Access Denied</h1>
+    <p class="subtitle">You don't have permission to view this page. If you believe this is a mistake, contact your Administrator.</p>
+
+    <a href="index.html" class="btn-primary full-width-link" id="home-link">Back to Sign In</a>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/google.js"></script>
+  <script src="js/auth.js"></script>
+  <script>
+    // A signed-in user landed here because THIS page wasn't theirs, not
+    // because they're signed out — send them back to their own correct
+    // page (reusing auth.js's ROLE_REDIRECT_MAP, the same lookup
+    // redirectByRole() uses, rather than a second copy of the map) instead
+    // of the sign-in form, which would just bounce them straight back here.
+    document.addEventListener("DOMContentLoaded", () => {
+      const role = getCurrentRole();
+      if (role && ROLE_REDIRECT_MAP[role]) {
+        const homeLink = document.getElementById("home-link");
+        homeLink.href = ROLE_REDIRECT_MAP[role];
+        homeLink.textContent = "Back to Dashboard";
+      }
+    });
+  </script>
+  <script src="js/living-effects.js"></script>
+</body>
+</html>

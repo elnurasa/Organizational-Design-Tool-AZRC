@@ -1,0 +1,339 @@
+/**
+ * living.css
+ * ---------------------------------------------------------------------------
+ * "Living org" visual layer. Loaded AFTER every other stylesheet and changes
+ * appearance only — no content, markup structure or behaviour. It adds:
+ *   - a brand-gradient band behind the page heading (with the animated node
+ *     network drawn by js/living-effects.js),
+ *   - softer, rounder panels, a floating toolbar, hover lift and a cursor
+ *     spotlight on selectable cards,
+ *   - the request-form stepper restyled to sit on the band.
+ * Every animation is switched off for users who prefer reduced motion.
+ * ---------------------------------------------------------------------------
+ */
+
+:root {
+  --band-h: 215px;
+  --panel-radius: 18px;
+  --panel-shadow: 0 18px 40px -30px rgba(6, 36, 32, 0.55);
+}
+
+body {
+  position: relative;
+  overflow-x: clip;
+}
+
+/* ---------- Gradient band behind the page heading ---------- */
+body:not(.login-page)::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--band-h);
+  background: var(--banner-gradient);
+  z-index: -1;
+  pointer-events: none;
+}
+
+body.request-page {
+  --band-h: 250px;
+}
+
+.living-net {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--band-h);
+  z-index: -1;
+  pointer-events: none;
+}
+
+body.login-page .living-net {
+  position: fixed;
+  height: 100vh;
+  z-index: 0;
+}
+
+body.login-page .login-card {
+  z-index: 2;
+}
+
+/* Page headings and links that sit on the band */
+.app-content > .content-header-row .content-heading,
+.admin-content > .content-heading,
+.admin-content > .content-header-row .content-heading {
+  color: #ffffff;
+}
+
+.app-content > .back-to-list-link {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.app-content > .back-to-list-link:hover {
+  color: #ffffff;
+}
+
+.app-content > .content-header-row .btn-primary,
+.admin-content > .content-header-row .btn-primary {
+  background: #ffffff;
+  color: var(--brand-navy);
+  border-color: #ffffff;
+}
+
+.app-content > .content-header-row .btn-primary:hover,
+.admin-content > .content-header-row .btn-primary:hover {
+  background: #ffffff;
+  box-shadow: 0 14px 28px -10px rgba(0, 0, 0, 0.45);
+}
+
+.app-content > .page-loading-state,
+.admin-content > .page-loading-state {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Request form stepper sits on the band */
+.progress-step {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.progress-step .step-dot {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+}
+
+.progress-step.active,
+.progress-step.completed {
+  color: #ffffff;
+}
+
+.progress-step.active .step-dot {
+  background: #ffffff;
+  color: var(--brand-navy);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.25);
+  animation: step-pulse 2.2s ease-out infinite;
+}
+
+.progress-step.completed .step-dot {
+  background: #a8f0b4;
+  color: #0d3b1f;
+}
+
+.progress-connector {
+  background: rgba(255, 255, 255, 0.38);
+}
+
+@keyframes step-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 12px rgba(255, 255, 255, 0);
+  }
+}
+
+/* ---------- Panels ---------- */
+.data-table-wrap,
+.card,
+.review-answer-card,
+.review-summary-card,
+.skeleton-card,
+.modal-dialog,
+.login-card {
+  border-radius: var(--panel-radius);
+}
+
+.data-table-wrap,
+.card,
+.review-answer-card,
+.review-summary-card,
+.skeleton-card {
+  box-shadow: var(--panel-shadow);
+}
+
+.data-table-wrap,
+.review-answer-card,
+.review-summary-card {
+  animation: living-rise 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@keyframes living-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Toolbar (search, filters, add button) floats as its own card */
+.table-toolbar {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  padding: 10px 12px;
+  box-shadow: var(--panel-shadow);
+}
+
+.data-table th {
+  letter-spacing: 0.06em;
+}
+
+.data-table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.data-table tbody tr:hover {
+  background: #f2f8f6;
+}
+
+/* ---------- Buttons: rounder, gentle lift ---------- */
+.btn-primary,
+.btn-secondary,
+.btn-danger,
+.row-action-button {
+  border-radius: 12px;
+}
+
+.btn-primary:not(:disabled):hover,
+.btn-secondary:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+
+.btn-primary:not(:disabled):hover {
+  box-shadow: 0 10px 22px -10px rgba(16, 59, 55, 0.7);
+}
+
+/* ---------- Cursor spotlight on selectable cards ---------- */
+.category-card,
+.review-answer-card {
+  position: relative;
+}
+
+.category-card::before,
+.review-answer-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: radial-gradient(180px circle at var(--x, 50%) var(--y, 50%), rgba(63, 160, 120, 0.16), transparent 70%);
+  opacity: 0;
+  transition: opacity 0.25s;
+  pointer-events: none;
+}
+
+.category-card:hover::before,
+.review-answer-card:hover::before {
+  opacity: 1;
+}
+
+.category-card {
+  border-radius: 14px;
+}
+
+/* ---------- Sign-in card ---------- */
+.login-card {
+  border-radius: 22px;
+  box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.6);
+}
+
+@media (max-width: 900px) {
+  :root {
+    --band-h: 190px;
+  }
+  body.request-page {
+    --band-h: 230px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .data-table-wrap,
+  .review-answer-card,
+  .review-summary-card,
+  .progress-step.active .step-dot {
+    animation: none;
+  }
+  .btn-primary:not(:disabled):hover,
+  .btn-secondary:not(:disabled):hover {
+    transform: none;
+  }
+}
+
+/* ---------- Closer to the Living org prototypes ---------- */
+:root {
+  --band-h: 270px;
+}
+
+.app-content {
+  padding-top: 46px;
+}
+
+.admin-content {
+  padding-top: 40px;
+}
+
+.app-content > .content-header-row {
+  margin-bottom: 30px;
+}
+
+.app-content > .content-header-row .content-heading,
+.admin-content > .content-heading,
+.admin-content > .content-header-row .content-heading {
+  font-size: clamp(28px, 3.4vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.admin-content > .content-heading {
+  margin-bottom: 30px;
+}
+
+/* Review pages (HRBP/OD review, request view) put the <h1> and back-link
+   directly inside .app-content, with no .content-header-row wrapper — the
+   rule above never matched them, leaving the title in its normal dark color
+   on top of the dark gradient band. */
+.app-content > .content-heading {
+  color: #ffffff;
+  font-size: clamp(26px, 3vw, 34px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin-bottom: 0;
+}
+
+.review-layout > .back-to-list-link {
+  margin-bottom: 0;
+}
+
+/* Sign-in card */
+.login-card {
+  animation: living-rise 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.form-group input[type="email"],
+.form-group input[type="password"],
+.form-group input[type="text"] {
+  border-radius: 12px;
+}
+
+/* A paragraph following the read-only detail grid gets room above it */
+.info-grid + .readonly-paragraph,
+.info-grid + .readonly-paragraph-label {
+  margin-top: 24px;
+}
+
+@media (max-width: 900px) {
+  :root {
+    --band-h: 230px;
+  }
+}
+
+/* ---------- Per-question "History" toggle ---------- */
+.q-history-answer {
+  background: #fafbfa;
+  border-radius: 8px;
+}

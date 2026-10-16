@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Structural Change Request · Organizational Design Tool</title>
+
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+  <link rel="stylesheet" href="css/workflow.css" />
+  <link rel="stylesheet" href="css/create-request.css" />
+  <link rel="stylesheet" href="css/living.css" />
+  <link rel="stylesheet" href="css/request-form-ux.css" />
+</head>
+<body class="request-page">
+
+  <!-- Sticky header -->
+  <header class="sticky-header">
+    <div class="header-left">
+      <img src="logo-white.png" alt="Azerconnect Group" class="topbar-logo" />
+      <div>
+        <h1 id="page-title">New Structural Change Request</h1>
+        <p class="header-subtitle">Submitted by <span id="header-manager-name">-</span></p>
+      </div>
+    </div>
+    <a href="manager.html" class="btn-secondary back-to-list-link" style="margin: 0;">← My Requests</a>
+  </header>
+
+  <!-- Progress indicator (create/edit mode only) -->
+  <nav class="progress-track hidden" id="progress-track" aria-label="Request progress">
+    <div class="progress-step active" data-step="1">
+      <span class="step-dot">1</span>
+      <span>Business Reason</span>
+    </div>
+    <div class="progress-connector"></div>
+    <div class="progress-step" data-step="2">
+      <span class="step-dot">2</span>
+      <span>Questions</span>
+    </div>
+    <div class="progress-connector"></div>
+    <div class="progress-step" data-step="3">
+      <span class="step-dot">3</span>
+      <span>Review</span>
+    </div>
+  </nav>
+
+  <main class="request-main" id="request-main">
+    <div id="page-loading">
+      <div class="skeleton-card">
+        <div class="skeleton-row" style="width: 40%;"></div>
+        <div class="skeleton-row" style="width: 90%;"></div>
+        <div class="skeleton-row" style="width: 75%;"></div>
+        <div class="skeleton-row" style="width: 60%;"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Sticky footer actions (create/edit mode only) -->
+  <footer class="sticky-footer hidden" id="sticky-footer">
+    <p id="draft-status" class="hidden"></p>
+    <div class="footer-actions">
+      <button type="button" class="btn-tertiary" id="cancel-button">Cancel</button>
+      <button type="button" class="btn-secondary" id="save-draft-button">Save Draft</button>
+      <button type="button" class="btn-secondary hidden" id="back-step-button">← Edit</button>
+      <button type="button" class="btn-primary" id="next-step-button">Next →</button>
+      <button type="button" class="btn-primary hidden" id="submit-button">Submit Request</button>
+    </div>
+  </footer>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-root"></div>
+
+  <!-- jsPDF — client-side only, no backend involved, used by the Export PDF
+       button once a request is approved. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/request-questions.js"></script>
+  <script src="js/request-service.js"></script>
+  <script src="js/workflow-shared.js"></script>
+  <script src="js/admin/admin-toast.js"></script>
+  <script src="js/admin/admin-modal.js"></script>
+  <script src="js/pdf-export.js"></script>
+  <script src="js/create-request.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", initCreateRequestPage);
+  </script>
+  <script src="js/request-form-ux.js"></script>
+  <script src="js/living-effects.js"></script>
+</body>
+</html>

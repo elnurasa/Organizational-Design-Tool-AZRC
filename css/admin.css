@@ -1,0 +1,1032 @@
+/**
+ * admin.css
+ * ---------------------------------------------------------------------------
+ * Shared shell + component styles: the Admin Panel layout (sidebar, topbar),
+ * and the generic data table, badges, pagination, modals and toasts that
+ * every page in the app reuses (Manager/HRBP/OD lists included). Builds on
+ * the tokens defined in style.css (loaded first).
+ * ---------------------------------------------------------------------------
+ */
+
+.admin-page {
+  background: var(--color-bg);
+}
+
+/* ---------- Layout ---------- */
+.admin-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.admin-sidebar {
+  width: 264px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  /* Same blue -> teal -> green as the header, running top to bottom */
+  background: var(--banner-gradient-vertical);
+  padding: 24px 0 20px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  box-shadow: 1px 0 0 rgba(255, 255, 255, 0.04);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 18px;
+  padding: 0 4px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.logo-placeholder.small {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  font-size: 13px;
+  border-radius: 10px;
+}
+
+.sidebar-logo {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 0 14px;
+}
+
+.sidebar-nav-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.66);
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.sidebar-nav-item:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.sidebar-nav-item:focus-visible,
+.sidebar-submenu-item:focus-visible {
+  outline-color: var(--brand-green-light);
+}
+
+.sidebar-nav-item::after {
+  content: "▾";
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+  transition: transform var(--transition-fast);
+}
+
+.sidebar-nav-item[aria-expanded="false"]::after {
+  transform: rotate(-90deg);
+}
+
+.sidebar-submenu {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 10px;
+  overflow: hidden;
+  max-height: 400px;
+  transition: max-height var(--transition-fast);
+}
+
+.sidebar-submenu.submenu-collapsed {
+  max-height: 0;
+  margin: 0;
+}
+
+.sidebar-submenu-item {
+  text-align: left;
+  padding: 11px 14px 11px 16px;
+  font-family: inherit;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.84);
+  background: none;
+  border: none;
+  border-left: 3px solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sidebar-submenu-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.sidebar-submenu-item-active {
+  color: #ffffff;
+  border-left-color: var(--brand-green-light);
+  background: rgba(255, 255, 255, 0.13);
+  font-weight: 600;
+}
+
+.admin-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- Top bars (Admin Panel + Manager/HRBP/OD pages share this look) ---------- */
+.admin-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 32px;
+  background: var(--banner-gradient);
+  color: #ffffff;
+}
+
+
+.admin-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.admin-topbar-title {
+  padding-left: 14px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  color: #ffffff;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.admin-topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.admin-topbar-user strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.admin-topbar-user .btn-secondary {
+  width: auto;
+  padding: 8px 16px;
+}
+
+.admin-content {
+  padding: 32px;
+  flex: 1;
+}
+
+.content-heading {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+  margin-bottom: 20px;
+}
+
+.page-loading-state {
+  padding: 100px 20px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--color-text-muted);
+}
+
+/* ---------- Table toolbar (search / filters / add) ---------- */
+.table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.table-search {
+  flex: 1;
+  min-width: 220px;
+  padding: 11px 14px 11px 40px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: #ffffff
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2352647a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E")
+    no-repeat 13px center / 17px 17px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.table-search::placeholder {
+  color: #8a9ab0;
+}
+
+.table-search:hover {
+  border-color: #a9b9cc;
+}
+
+.table-search:focus {
+  outline: none;
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.table-filter {
+  padding: 11px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.table-filter:hover {
+  border-color: #a9b9cc;
+}
+
+.table-filter:focus {
+  outline: none;
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.table-add-button {
+  margin-left: auto;
+  width: auto;
+  padding: 11px 20px;
+  white-space: nowrap;
+}
+
+/* ---------- Data table ---------- */
+.data-table-wrap {
+  overflow-x: auto;
+  overflow-y: auto;
+  max-height: 68vh;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 14px 18px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.data-table td {
+  color: var(--color-text);
+  border-top: 1px solid #edf1f6;
+}
+
+.data-table tbody tr:first-child td {
+  border-top: none;
+}
+
+.data-table thead.sticky-table-head th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: 13px;
+  padding-bottom: 13px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #3c4f66;
+  background: #f1f5fa;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.data-table th.sortable-header {
+  cursor: pointer;
+  user-select: none;
+}
+
+.data-table th.sortable-header:hover {
+  color: var(--brand-navy);
+}
+
+.data-table th.sort-active {
+  color: var(--brand-navy);
+}
+
+.data-table th.sort-active[data-sort-dir="asc"]::after {
+  content: " ▲";
+  font-size: 10px;
+}
+
+.data-table th.sort-active[data-sort-dir="desc"]::after {
+  content: " ▼";
+  font-size: 10px;
+}
+
+.data-table tbody tr {
+  transition: background var(--transition-fast);
+}
+
+.data-table tbody tr:hover td {
+  background: #f6f9fd;
+}
+
+.table-loading-cell,
+.table-empty-cell {
+  text-align: center !important;
+  padding: 56px 16px !important;
+  color: var(--color-text-muted);
+  white-space: normal;
+}
+
+.table-actions-cell {
+  white-space: nowrap;
+}
+
+.row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.row-action-button {
+  padding: 6px 13px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--brand-navy);
+  background: var(--navy-50);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.row-action-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.row-action-button:hover {
+  background: var(--navy-100);
+  border-color: var(--navy-200);
+}
+
+.row-action-danger {
+  color: var(--color-error);
+  background: rgba(198, 40, 40, 0.07);
+}
+
+.row-action-danger:hover {
+  background: rgba(198, 40, 40, 0.14);
+  border-color: rgba(198, 40, 40, 0.25);
+}
+
+.row-action-primary {
+  color: var(--color-success);
+  background: rgba(58, 116, 32, 0.1);
+}
+
+.row-action-primary:hover {
+  background: rgba(58, 116, 32, 0.18);
+  border-color: rgba(58, 116, 32, 0.3);
+}
+
+/* ---------- Row action colour matching the row's own Status badge ----------
+   One class per STATUS_BADGE_VARIANT value (see badge-* above), applied to a
+   row's primary action button (View/Edit/Review) by rowActionClassForStatus()
+   in workflow-shared.js, so the Actions column reads as an extension of the
+   Status column instead of a flat, unrelated colour — e.g. an approved row's
+   action button is green, a rejected row's is red, a brand-new submission's
+   is blue. Each one reuses exactly the colour its matching badge-* class
+   uses. Delete/Withdraw keep their own fixed row-action-danger red instead —
+   that's warning about the action, not describing the request's state. */
+.row-action-status-draft {
+  color: #57677d;
+  background: rgba(87, 103, 125, 0.08);
+}
+
+.row-action-status-draft:hover {
+  background: rgba(87, 103, 125, 0.16);
+  border-color: rgba(87, 103, 125, 0.3);
+}
+
+.row-action-status-submitted {
+  color: #1d5c9e;
+  background: rgba(29, 92, 158, 0.08);
+}
+
+.row-action-status-submitted:hover {
+  background: rgba(29, 92, 158, 0.16);
+  border-color: rgba(29, 92, 158, 0.3);
+}
+
+.row-action-status-hrbp-review {
+  color: #0f7d6c;
+  background: rgba(15, 125, 108, 0.08);
+}
+
+.row-action-status-hrbp-review:hover {
+  background: rgba(15, 125, 108, 0.16);
+  border-color: rgba(15, 125, 108, 0.3);
+}
+
+.row-action-status-od-review {
+  color: #7238b5;
+  background: rgba(114, 56, 181, 0.08);
+}
+
+.row-action-status-od-review:hover {
+  background: rgba(114, 56, 181, 0.16);
+  border-color: rgba(114, 56, 181, 0.3);
+}
+
+.row-action-status-returned-requester {
+  color: #9a6b07;
+  background: rgba(217, 158, 6, 0.1);
+}
+
+.row-action-status-returned-requester:hover {
+  background: rgba(217, 158, 6, 0.18);
+  border-color: rgba(217, 158, 6, 0.32);
+}
+
+.row-action-status-returned-hrbp {
+  color: #b34a12;
+  background: rgba(179, 74, 18, 0.08);
+}
+
+.row-action-status-returned-hrbp:hover {
+  background: rgba(179, 74, 18, 0.16);
+  border-color: rgba(179, 74, 18, 0.3);
+}
+
+.row-action-status-success {
+  color: var(--color-success);
+  background: rgba(58, 116, 32, 0.1);
+}
+
+.row-action-status-success:hover {
+  background: rgba(58, 116, 32, 0.18);
+  border-color: rgba(58, 116, 32, 0.3);
+}
+
+.row-action-status-danger {
+  color: var(--color-error);
+  background: rgba(198, 40, 40, 0.07);
+}
+
+.row-action-status-danger:hover {
+  background: rgba(198, 40, 40, 0.14);
+  border-color: rgba(198, 40, 40, 0.25);
+}
+
+.row-action-status-withdrawn {
+  color: #6b5a4a;
+  background: rgba(120, 96, 72, 0.08);
+}
+
+.row-action-status-withdrawn:hover {
+  background: rgba(120, 96, 72, 0.16);
+  border-color: rgba(120, 96, 72, 0.3);
+}
+
+/* ---------- Password cell (table) ---------- */
+.password-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.password-cell-value {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.password-eye-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.password-eye-toggle:hover {
+  background: var(--navy-100);
+}
+
+/* ---------- Password input (Create/Edit modal) ---------- */
+.password-field-wrap {
+  position: relative;
+}
+
+.password-field-wrap input {
+  padding-right: 44px;
+}
+
+.password-field-wrap .password-eye-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+}
+
+/* ---------- Badges (status pills) — each carries a leading dot so status
+   is never conveyed by colour alone ---------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 11px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  border-radius: 999px;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge-success {
+  color: var(--color-success);
+  background: rgba(58, 116, 32, 0.12);
+}
+
+.badge-neutral {
+  color: #4a5b70;
+  background: #eaeff5;
+}
+
+.badge-info {
+  color: var(--brand-navy);
+  background: rgba(var(--primary-rgb), 0.1);
+}
+
+.badge-warning {
+  color: #9a4707;
+  background: rgba(217, 119, 6, 0.14);
+}
+
+.badge-danger {
+  color: var(--color-error);
+  background: rgba(198, 40, 40, 0.1);
+}
+
+/* ---------- Request status badges — one distinct colour per lifecycle
+   stage, not just per outcome category, so e.g. "Submitted" and "HRBP
+   Review" (both previously the shared blue badge-info) read apart at a
+   glance. approved/rejected reuse badge-success/badge-danger above, since
+   those already are the semantically correct terminal colours; every other
+   stage gets its own hue here, ordered as the request actually flows:
+   draft (not yet in the process) -> submitted -> hrbp_review -> od_review,
+   with the two "sent back, needs action" statuses each getting their own
+   shade of amber so a Requester's vs. an HRBP's queue don't look identical,
+   and withdrawn its own neutral so it isn't mistaken for a fresh draft. ---------- */
+.badge-draft {
+  color: #57677d;
+  background: #e7ebf1;
+}
+
+.badge-submitted {
+  color: #1d5c9e;
+  background: rgba(29, 92, 158, 0.12);
+}
+
+.badge-hrbp-review {
+  color: #0f7d6c;
+  background: rgba(15, 125, 108, 0.12);
+}
+
+.badge-od-review {
+  color: #7238b5;
+  background: rgba(114, 56, 181, 0.12);
+}
+
+.badge-returned-requester {
+  color: #9a6b07;
+  background: rgba(217, 158, 6, 0.16);
+}
+
+.badge-returned-hrbp {
+  color: #b34a12;
+  background: rgba(179, 74, 18, 0.14);
+}
+
+.badge-withdrawn {
+  color: #6b5a4a;
+  background: rgba(120, 96, 72, 0.14);
+}
+
+/* Wraps a status badge plus its optional secondary tag (buildBadgeCell in
+   js/workflow-shared.js) — e.g. "Returned to Requester" + "After OD review"
+   for a request that has already looped through OD once. Deliberately not
+   a second colour on the main badge: the lifecycle stage stays the single
+   source of colour truth, this is just supplementary context. */
+.badge-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.badge-secondary-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+}
+
+/* ---------- Pagination footer ---------- */
+.table-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.table-summary,
+.table-page-label {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+.table-pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.table-pager .btn-secondary {
+  width: auto;
+  padding: 8px 16px;
+}
+
+.table-pager .btn-secondary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Modals ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(2, 31, 64, 0.55);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: fade-in 0.15s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-dialog {
+  position: relative;
+  width: 100%;
+  max-width: 560px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: card-enter 0.2s ease;
+}
+
+.modal-dialog::before {
+  content: "";
+  height: 4px;
+  flex-shrink: 0;
+  background: var(--brand-gradient);
+}
+
+.modal-dialog-small {
+  max-width: 440px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 26px;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.modal-header h2 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--brand-navy);
+}
+
+.modal-close-button {
+  width: 32px;
+  height: 32px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.modal-close-button:hover {
+  color: var(--color-text);
+  background: var(--navy-50);
+}
+
+.modal-body {
+  padding: 22px 26px;
+  overflow-y: auto;
+  font-size: 14.5px;
+  line-height: 1.55;
+}
+
+.modal-description {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  background: var(--navy-50);
+  border-left: 3px solid var(--brand-navy);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  padding: 10px 14px;
+  margin: 0 0 18px;
+}
+
+.modal-body .form-group {
+  margin-bottom: 16px;
+}
+
+.modal-body .form-group label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.modal-body input {
+  width: 100%;
+  padding: 11px 13px;
+  font-family: inherit;
+  font-size: 14.5px;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.modal-body input:hover {
+  border-color: #a9b9cc;
+}
+
+.modal-body input:focus {
+  outline: none;
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.view-field-value {
+  padding-top: 8px;
+  font-size: 14.5px;
+  color: var(--color-text);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 26px;
+  background: #f8fafc;
+  border-top: 1px solid #edf1f6;
+}
+
+.modal-footer .btn-primary,
+.modal-footer .btn-secondary,
+.modal-footer .btn-danger {
+  width: auto;
+  padding: 10px 22px;
+}
+
+.form-error-banner {
+  margin-top: 8px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid rgba(198, 40, 40, 0.22);
+  border-left: 3px solid var(--color-error);
+  border-radius: var(--radius-md);
+}
+
+.btn-danger {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #ffffff;
+  background: var(--color-error);
+  border: 1px solid #a91f1f;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(150, 20, 20, 0.3);
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #b32323;
+}
+
+.btn-danger:disabled {
+  color: rgba(255, 255, 255, 0.85);
+  background: #b7c2d1;
+  border-color: #b7c2d1;
+  box-shadow: none;
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+/* ---------- Toasts ---------- */
+.toast-container {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 360px;
+}
+
+.toast {
+  padding: 13px 18px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 32px -8px rgba(2, 31, 64, 0.35);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast-success {
+  background: #2d6a1c;
+}
+
+.toast-error {
+  background: #b32323;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 900px) {
+  .admin-layout {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    padding: 10px 12px;
+    overflow-x: auto;
+  }
+
+  .sidebar-brand {
+    display: none;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    padding: 0;
+  }
+
+  .sidebar-nav-item {
+    display: none;
+  }
+
+  .sidebar-submenu {
+    flex-direction: row;
+    max-height: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .sidebar-submenu.submenu-collapsed {
+    max-height: none;
+  }
+
+  .sidebar-submenu-item {
+    border-left: none;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+    border-radius: var(--radius-md);
+  }
+
+  .sidebar-submenu-item-active {
+    border-left: none;
+    border-bottom-color: var(--brand-green-light);
+  }
+
+  .admin-content {
+    padding: 18px 16px;
+  }
+
+  .table-add-button {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .admin-topbar {
+    padding: 12px 16px;
+  }
+}
+
+@media (max-width: 640px) {
+  .admin-topbar-title {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .modal-dialog {
+    max-width: 100%;
+  }
+
+  .admin-topbar-user span {
+    display: none;
+  }
+}

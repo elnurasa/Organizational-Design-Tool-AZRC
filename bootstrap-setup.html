@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>One-Time Admin Setup</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 520px; margin: 48px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; }
+  p.hint { color: #555; font-size: 14px; }
+  label { display: block; margin-top: 14px; font-weight: bold; font-size: 14px; }
+  input { width: 100%; padding: 8px; font-size: 14px; box-sizing: border-box; margin-top: 4px; }
+  button { margin-top: 22px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: 0.6; cursor: default; }
+  #result { margin-top: 20px; padding: 14px; border-radius: 6px; font-size: 14px; white-space: pre-wrap; display: none; }
+  #result.ok { background: #e6f4ea; border: 1px solid #34a853; display: block; }
+  #result.err { background: #fce8e6; border: 1px solid #ea4335; display: block; }
+  #copyBox { width: 100%; margin-top: 8px; font-family: monospace; font-size: 13px; padding: 6px; }
+</style>
+</head>
+<body>
+  <h1>One-Time Admin Account Setup</h1>
+  <p class="hint">
+    This page runs once to create the first OD Admin account. It talks directly
+    to your Apps Script and Supabase project — nothing you type here is sent
+    anywhere else. You can delete this file when you're done.
+  </p>
+
+  <form id="setupForm">
+    <label for="bootstrapKey">Bootstrap Key (the one you just set in Apps Script)</label>
+    <input id="bootstrapKey" type="password" autocomplete="off" required />
+
+    <label for="fullName">Full Name</label>
+    <input id="fullName" type="text" required />
+
+    <label for="jobTitle">Job Title</label>
+    <input id="jobTitle" type="text" required />
+
+    <label for="email">Email</label>
+    <input id="email" type="email" required />
+
+    <label for="password">Password (this will be your Sign In password)</label>
+    <input id="password" type="password" autocomplete="off" required />
+
+    <label for="company">Company (optional)</label>
+    <input id="company" type="text" />
+
+    <button type="submit" id="submitBtn">Create Admin Account</button>
+  </form>
+
+  <div id="result"></div>
+
+  <hr style="margin-top: 32px;" />
+  <h2 style="font-size: 16px;">Check My Role (use this if the account was already created)</h2>
+  <p class="hint">Signs in with the Email/Password above and checks your role — does NOT try to create the account again.</p>
+  <button type="button" id="checkRoleBtn">Check My Role</button>
+  <div id="checkRoleResult" style="margin-top: 14px; padding: 14px; border-radius: 6px; font-size: 14px; white-space: pre-wrap; display: none;"></div>
+
+  <hr style="margin-top: 32px;" />
+  <h2 style="font-size: 16px;">Connection Test (optional — does not touch your account)</h2>
+  <p class="hint">Only use this if the button above showed an error. These two buttons send no password, no bootstrap key, and make no changes — they just check what your network allows.</p>
+  <button type="button" id="testGetBtn">Test A: Simple Request</button>
+  <button type="button" id="testPostBtn">Test B: Data Request</button>
+  <button type="button" id="testPostBtn2">Test C: Shaped Request</button>
+  <div id="testResult" style="margin-top: 14px; padding: 14px; border-radius: 6px; font-size: 14px; white-space: pre-wrap; display: none;"></div>
+
+  <script src="js/config.js"></script>
+  <script>
+    const form = document.getElementById("setupForm");
+    const resultBox = document.getElementById("result");
+    const submitBtn = document.getElementById("submitBtn");
+
+    function showResult(kind, text, copyText) {
+      resultBox.className = kind;
+      resultBox.textContent = text;
+      if (copyText) {
+        resultBox.textContent += "\n\nCopy this line to send back:\n";
+        const box = document.createElement("input");
+        box.id = "copyBox";
+        box.readOnly = true;
+        box.value = copyText;
+        resultBox.appendChild(box);
+        box.select();
+      }
+    }
+
+    if (window.location.protocol === "file:") {
+      showResult("err",
+        "This page was opened directly from a file (address bar starts with file://). " +
+        "It must be opened through the local web server instead: " +
+        "http://localhost:8080/bootstrap-setup.html"
+      );
+    }
+
+    function b64Encode(value) {
+      if (value === undefined || value === null || value === "") return value;
+      return btoa(unescape(encodeURIComponent(String(value))));
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Working...";
+      resultBox.className = "";
+      resultBox.textContent = "";
+
+      const bootstrapKey = document.getElementById("bootstrapKey").value;
+      const fullName = document.getElementById("fullName").value.trim();
+      const jobTitle = document.getElementById("jobTitle").value.trim();
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const company = document.getElementById("company").value.trim();
+
+      try {
+        let bootstrapResp;
+        try {
+          bootstrapResp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify({
+              action: "bootstrapAdmin",
+              bootstrap_key: b64Encode(bootstrapKey),
+              employees: [{ role: "OD", full_name: fullName, job_title: jobTitle, email: b64Encode(email), password: b64Encode(password), company: company }],
+            }),
+          }).then((r) => r.json());
+        } catch (e) {
+          showResult("err", "Step 1 (creating account) could not reach Google Apps Script: " + e.message, `RESULT: FAILED - step1 - ${e.message}`);
+          return;
+        }
+
+        const created = bootstrapResp.results && bootstrapResp.results[0];
+        if (!created || created.status !== "success") {
+          const msg = (created && created.message) || bootstrapResp.message || "Unknown error.";
+          showResult("err", "Step 1 (creating account) failed: " + msg, `RESULT: FAILED - step1 - ${msg}`);
+          return;
+        }
+
+        let signInResp;
+        try {
+          signInResp = await fetch(`${CONFIG.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+            method: "POST",
+            headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email, password: password }),
+          }).then((r) => r.json());
+        } catch (e) {
+          showResult("err", "Step 2 (sign-in check) could not reach Supabase: " + e.message, `RESULT: FAILED - step2 - ${e.message}`);
+          return;
+        }
+
+        if (!signInResp.access_token) {
+          showResult("err", "Step 2 (sign-in check) failed: " + (signInResp.error_description || signInResp.msg || "no access token returned"), "RESULT: FAILED - step2 - no token");
+          return;
+        }
+
+        let roleResp;
+        try {
+          roleResp = await fetch(
+            `${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+          ).then((r) => r.json());
+        } catch (e) {
+          showResult("err", "Step 3 (role check) could not reach Google Apps Script: " + e.message, `RESULT: FAILED - step3 - ${e.message}`);
+          return;
+        }
+
+        const ok = roleResp.role === "OD" && roleResp.isAdmin === true;
+        showResult(
+          ok ? "ok" : "err",
+          ok ? "Success! Your Admin account is ready." : "Account created, but role check did not come back as expected. Raw response: " + JSON.stringify(roleResp),
+          `RESULT: ${JSON.stringify(roleResp)}`
+        );
+      } catch (e) {
+        showResult("err", "Something went wrong: " + e.message, `RESULT: FAILED - ${e.message}`);
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Create Admin Account";
+      }
+    });
+
+    const testGetBtn = document.getElementById("testGetBtn");
+    const testPostBtn = document.getElementById("testPostBtn");
+    const testResult = document.getElementById("testResult");
+
+    function showTestResult(kind, text) {
+      testResult.style.display = "block";
+      testResult.style.background = kind === "ok" ? "#e6f4ea" : "#fce8e6";
+      testResult.style.border = "1px solid " + (kind === "ok" ? "#34a853" : "#ea4335");
+      testResult.textContent = text;
+    }
+
+    testGetBtn.addEventListener("click", async () => {
+      testGetBtn.disabled = true;
+      showTestResult("ok", "Testing...");
+      try {
+        const resp = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=diagnostic-test`, { method: "GET" });
+        const text = await resp.text();
+        showTestResult("ok", "Test A result: SUCCESS — received: " + text);
+      } catch (e) {
+        showTestResult("err", "Test A result: BLOCKED — " + e.message);
+      } finally {
+        testGetBtn.disabled = false;
+      }
+    });
+
+    testPostBtn.addEventListener("click", async () => {
+      testPostBtn.disabled = true;
+      showTestResult("ok", "Testing...");
+      try {
+        const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "__diagnostic_test__" }),
+        });
+        const text = await resp.text();
+        showTestResult("ok", "Test B result: SUCCESS — received: " + text);
+      } catch (e) {
+        showTestResult("err", "Test B result: BLOCKED — " + e.message);
+      } finally {
+        testPostBtn.disabled = false;
+      }
+    });
+
+    const testPostBtn2 = document.getElementById("testPostBtn2");
+    testPostBtn2.addEventListener("click", async () => {
+      testPostBtn2.disabled = true;
+      showTestResult("ok", "Testing...");
+      try {
+        const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({
+            action: "__diagnostic_test__",
+            bootstrap_key: "placeholder",
+            employees: [{ role: "OD", full_name: "Test User", job_title: "Tester", email: "test@example.com", password: "placeholder123", company: "Test Co" }],
+          }),
+        });
+        const text = await resp.text();
+        showTestResult("ok", "Test C result: SUCCESS — received: " + text);
+      } catch (e) {
+        showTestResult("err", "Test C result: BLOCKED — " + e.message);
+      } finally {
+        testPostBtn2.disabled = false;
+      }
+    });
+
+    const checkRoleBtn = document.getElementById("checkRoleBtn");
+    const checkRoleResult = document.getElementById("checkRoleResult");
+    checkRoleBtn.addEventListener("click", async () => {
+      checkRoleBtn.disabled = true;
+      checkRoleResult.style.display = "block";
+      checkRoleResult.style.background = "#e6f4ea";
+      checkRoleResult.style.border = "1px solid #34a853";
+      checkRoleResult.textContent = "Checking...";
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      try {
+        const signInResp = await fetch(`${CONFIG.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email, password: password }),
+        }).then((r) => r.json());
+
+        if (!signInResp.access_token) {
+          checkRoleResult.style.background = "#fce8e6";
+          checkRoleResult.style.border = "1px solid #ea4335";
+          checkRoleResult.textContent = "Sign-in failed: " + (signInResp.error_description || signInResp.msg || "no access token returned");
+          return;
+        }
+
+        const roleResp = await fetch(
+          `${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+        ).then((r) => r.json());
+        const debugResp = await fetch(
+          `${CONFIG.GOOGLE_SCRIPT_URL}?debugResolve=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+        ).then((r) => r.json());
+
+        const ok = roleResp.role === "OD" && roleResp.isAdmin === true;
+        checkRoleResult.style.background = ok ? "#e6f4ea" : "#fce8e6";
+        checkRoleResult.style.border = "1px solid " + (ok ? "#34a853" : "#ea4335");
+        checkRoleResult.textContent = "RESULT: " + JSON.stringify(roleResp) + "\nDEBUG: " + JSON.stringify(debugResp);
+      } catch (e) {
+        checkRoleResult.style.background = "#fce8e6";
+        checkRoleResult.style.border = "1px solid #ea4335";
+        checkRoleResult.textContent = "RESULT: FAILED - " + e.message;
+      } finally {
+        checkRoleBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

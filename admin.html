@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Panel · Organizational Design Tool</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+  <link rel="stylesheet" href="css/living.css" />
+</head>
+<body class="admin-page">
+
+  <div class="admin-layout">
+    <!-- Left sidebar -->
+    <aside class="admin-sidebar">
+      <div class="sidebar-brand">
+        <span>Admin Panel</span>
+      </div>
+
+      <nav class="sidebar-nav" aria-label="Admin sections">
+        <button type="button" class="sidebar-nav-item" data-nav="accesses" aria-expanded="true">
+          Accesses
+        </button>
+        <div class="sidebar-submenu" id="accesses-submenu">
+          <button type="button" class="sidebar-submenu-item" data-section="Manager">Managers</button>
+          <button type="button" class="sidebar-submenu-item" data-section="HRBP">HRBPs</button>
+          <button type="button" class="sidebar-submenu-item" data-section="OD">OD</button>
+          <button type="button" class="sidebar-submenu-item" data-section="AdminProfiles">Admin Profiles</button>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Main content -->
+    <div class="admin-main">
+      <header class="admin-topbar">
+        <div class="admin-topbar-left">
+          <img src="logo-white.png" alt="Azerconnect Group" class="topbar-logo" />
+          <span class="admin-topbar-title">Organizational Design Tool</span>
+        </div>
+        <div class="admin-topbar-user">
+          <span>Signed in as <strong id="user-email">-</strong></span>
+          <a href="#" id="back-to-dashboard-link" class="btn-secondary hidden">Back to My Dashboard</a>
+          <button type="button" id="logout-button" class="btn-secondary">Log Out</button>
+        </div>
+      </header>
+
+      <main class="admin-content" id="admin-content">
+        <!-- replaced by js/admin/admin-app.js as soon as the Admin check resolves -->
+        <div class="page-loading-state">Loading Admin Panel…</div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Toasts + modal render targets -->
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-root"></div>
+
+  <!-- Scripts: session layer first, then Admin Panel modules. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/google.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/password-rules.js"></script>
+  <script src="js/admin/constants.js"></script>
+  <script src="js/admin/admin-api.js"></script>
+  <script src="js/admin/admin-toast.js"></script>
+  <script src="js/admin/admin-table.js"></script>
+  <script src="js/admin/admin-modal.js"></script>
+  <script src="js/admin/admin-app.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", initAdminPanel);
+  </script>
+  <script src="js/living-effects.js"></script>
+</body>
+</html>

@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OD Inbox · Organizational Design Tool</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+  <link rel="stylesheet" href="css/workflow.css" />
+  <link rel="stylesheet" href="css/living.css" />
+</head>
+<body>
+
+  <header class="app-topbar">
+    <div class="app-topbar-left">
+      <img src="logo-white.png" alt="Azerconnect Group" class="topbar-logo" />
+      <span class="app-topbar-title">Organizational Design Tool</span>
+    </div>
+    <div class="app-topbar-user">
+      <span>Signed in as <strong id="user-email">-</strong></span>
+      <a href="admin.html" id="admin-panel-link" class="btn-secondary hidden">Admin Panel</a>
+      <button type="button" id="logout-button" class="btn-secondary">Log Out</button>
+    </div>
+  </header>
+
+  <main class="app-content">
+    <div class="content-header-row">
+      <h1 class="content-heading">OD Inbox</h1>
+    </div>
+    <div id="inbox-table-container">
+      <div class="page-loading-state">Loading inbox…</div>
+    </div>
+  </main>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-root"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/request-questions.js"></script>
+  <script src="js/request-service.js"></script>
+  <script src="js/workflow-shared.js"></script>
+  <script src="js/admin/admin-toast.js"></script>
+  <script src="js/admin/admin-table.js"></script>
+  <script src="js/admin/admin-modal.js"></script>
+  <script src="js/od-inbox.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", initOdInboxPage);
+  </script>
+  <script src="js/living-effects.js"></script>
+</body>
+</html>

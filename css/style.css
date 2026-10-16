@@ -1,0 +1,529 @@
+/**
+ * style.css
+ * ---------------------------------------------------------------------------
+ * Global design system for the Organizational Design Tool: design tokens,
+ * base typography, the sign-in page, buttons, form controls and utilities.
+ * Every other stylesheet (admin.css, workflow.css, create-request.css)
+ * builds on the tokens defined here.
+ *
+ * Palette is taken straight from the Azerconnect Group logo: a deep navy
+ * (the wordmark) and a dark green (the top-right dot), joined by the same
+ * navy -> green gradient the logo's dot grid uses. Everything else is a
+ * cool, navy-tinted neutral so the brand colours carry the identity and
+ * the content stays easy to read.
+ * ---------------------------------------------------------------------------
+ */
+
+/* ---------- Reset & base ---------- */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  /* Brand (sampled from the logo) */
+  --brand-navy: #18504a;
+  --brand-navy-dark: #103b37;
+  --brand-navy-deep: #0b2a27;
+  --brand-green: #3a7420;
+  --brand-green-light: #8fce5a;
+  --brand-gradient: var(--banner-gradient);
+  --brand-gradient-diagonal: var(--banner-gradient-diagonal);
+
+  /* Header / sidebar / sign-in background — sampled from the Azerconnect
+     Group brand banner: deep blue -> dark teal -> deep green. Flat, no
+     texture or glow. */
+  --banner-blue: #1a3a80;
+  --banner-teal: #133a4a;
+  --banner-teal-green: #17423a;
+  --banner-green: #21541a;
+  --banner-gradient: linear-gradient(90deg, #1a3a80 0%, #133a4a 38%, #17423a 64%, #21541a 100%);
+  --banner-gradient-diagonal: linear-gradient(135deg, #1a3a80 0%, #133a4a 40%, #17423a 68%, #21541a 100%);
+  --banner-gradient-vertical: linear-gradient(180deg, #1a3a80 0%, #133a4a 42%, #17423a 80%, #1d4a17 100%);
+
+  /* Navy tints (hover / selected / subtle fills) */
+  --navy-50: #eff6f4;
+  --navy-100: #dfece9;
+  --navy-200: #c2dad5;
+
+  /* Legacy token names — kept so every existing rule and inline
+     var(--color-*) reference keeps working */
+  --color-bg: #f3f6f5;
+  --color-surface: #ffffff;
+  --color-primary: var(--brand-navy);
+  --color-primary-dark: var(--brand-navy-dark);
+  --color-text: #0f2421;
+  --color-text-muted: #56675f;
+  --color-border: #dde6e3;
+  --color-border-strong: #c4d3cf;
+  --color-error: #c62828;
+  --color-error-bg: #fdf1f1;
+  --color-success: #2f7a1f;
+  --color-warning: #b45309;
+  --color-card-border: rgba(255, 255, 255, 0.4);
+
+  --primary-rgb: 24, 80, 74;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(6, 36, 32, 0.06), 0 1px 3px rgba(6, 36, 32, 0.05);
+  --shadow-card: 0 1px 2px rgba(6, 36, 32, 0.05), 0 8px 24px -8px rgba(6, 36, 32, 0.12);
+  --shadow-pop: 0 24px 60px -12px rgba(2, 31, 64, 0.35);
+  --focus-ring: 0 0 0 3px rgba(var(--primary-rgb), 0.2);
+
+  --transition-fast: 0.18s ease;
+  --transition-medium: 0.4s ease;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  font-family: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(var(--primary-rgb), 0.18);
+}
+
+/* One consistent, clearly visible keyboard focus indicator everywhere */
+:focus-visible {
+  outline: 2px solid var(--brand-navy);
+  outline-offset: 2px;
+}
+
+/* ---------- Sign-in page ---------- */
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--banner-gradient-diagonal);
+  overflow: hidden;
+}
+
+.login-card {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  padding: 44px 40px 36px;
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: var(--shadow-pop);
+  text-align: center;
+  overflow: hidden;
+  animation: card-enter 0.5s ease;
+}
+
+/* Brand gradient strip across the top of the card */
+.login-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--brand-gradient);
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- Logo ---------- */
+.logo-placeholder {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 20px;
+  border-radius: 14px;
+  background: var(--brand-gradient-diagonal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.5px;
+  box-shadow: 0 8px 20px rgba(var(--primary-rgb), 0.3);
+}
+
+.login-logo {
+  display: block;
+  max-width: 230px;
+  max-height: 60px;
+  width: auto;
+  height: auto;
+  margin: 0 auto 22px;
+}
+
+/* Small left-aligned logo used in dashboard/admin topbars — per standard
+   header sizing guidance (bar ~52-90px tall, logo ~20-40px tall inside),
+   left-aligned like every other left-to-right product header. */
+.topbar-logo {
+  display: block;
+  height: 34px;
+  width: auto;
+}
+
+/* Controls that sit on the dark brand header */
+.app-topbar .btn-secondary,
+.admin-topbar .btn-secondary,
+.sticky-header .btn-secondary {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.app-topbar .btn-secondary:hover,
+.admin-topbar .btn-secondary:hover,
+.sticky-header .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.app-topbar :focus-visible,
+.admin-topbar :focus-visible,
+.sticky-header :focus-visible {
+  outline-color: #ffffff;
+}
+
+.login-card h1 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--brand-navy);
+  margin-bottom: 6px;
+}
+
+.login-card p.subtitle {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  margin-bottom: 28px;
+}
+
+/* ---------- Form ---------- */
+.form-group {
+  text-align: left;
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 7px;
+}
+
+.form-group input[type="email"],
+.form-group input[type="password"],
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.form-group input::placeholder {
+  color: #8a9ab0;
+}
+
+.form-group input[type="email"]:hover,
+.form-group input[type="password"]:hover,
+.form-group input[type="text"]:hover {
+  border-color: #a9b9cc;
+}
+
+.form-group input[type="email"]:focus,
+.form-group input[type="password"]:focus,
+.form-group input[type="text"]:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+/* Password field with an inline show/hide toggle icon */
+.password-field {
+  position: relative;
+}
+
+.password-field input {
+  padding-right: 46px; /* room for the toggle icon */
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.password-toggle:hover {
+  color: var(--brand-navy);
+  background: var(--navy-50);
+}
+
+.password-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.password-toggle .icon-eye-off {
+  display: none;
+}
+
+.password-toggle.is-visible .icon-eye {
+  display: none;
+}
+
+.password-toggle.is-visible .icon-eye-off {
+  display: block;
+}
+
+/* Inline, field-level validation message (below a specific input) */
+.field-error-text {
+  margin-top: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+/* ---------- Buttons ---------- */
+.btn-primary {
+  position: relative;
+  width: 100%;
+  padding: 13px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0.005em;
+  color: #ffffff;
+  background: var(--brand-navy);
+  border: 1px solid var(--brand-navy-dark);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  box-shadow: 0 1px 2px rgba(3, 46, 89, 0.3), 0 6px 14px -6px rgba(var(--primary-rgb), 0.55);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #05509a;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 2px rgba(3, 46, 89, 0.3), 0 10px 20px -8px rgba(var(--primary-rgb), 0.6);
+}
+
+.btn-primary:active:not(:disabled) {
+  background: var(--brand-navy-dark);
+  transform: translateY(0);
+}
+
+.btn-primary:focus-visible {
+  outline: 2px solid var(--brand-navy);
+  outline-offset: 2px;
+}
+
+.btn-primary:disabled {
+  color: rgba(255, 255, 255, 0.85);
+  background: #b7c2d1;
+  border-color: #b7c2d1;
+  box-shadow: none;
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--brand-navy);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-decoration: none;
+  transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast);
+}
+
+.btn-secondary:hover {
+  background: var(--navy-50);
+  border-color: var(--navy-200);
+}
+
+.btn-secondary:active {
+  transform: translateY(1px);
+}
+
+.btn-secondary:disabled {
+  color: #9aa8a4;
+  background: #eef2f1;
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+
+.btn-secondary:disabled:hover {
+  background: #eef2f1;
+  border-color: var(--color-border);
+}
+
+/* ---------- Loading spinner ---------- */
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---------- Success checkmark ---------- */
+.success-check {
+  width: 20px;
+  height: 20px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity var(--transition-medium), transform var(--transition-medium);
+}
+
+.success-check.visible {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ---------- Error component ---------- */
+.error-message {
+  margin-top: 16px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-error);
+  background: var(--color-error-bg);
+  border: 1px solid rgba(198, 40, 40, 0.22);
+  border-left: 3px solid var(--color-error);
+  border-radius: var(--radius-md);
+  text-align: left;
+}
+
+.shake {
+  animation: shake 0.4s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+/* ---------- Utility ---------- */
+.hidden {
+  display: none !important;
+}
+
+.footer-note {
+  margin-top: 24px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+
+/* ---------- Dashboard pages (Phase 1 placeholders) ---------- */
+.dashboard-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+
+.dashboard-page h1 {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.dashboard-page p {
+  color: var(--color-text-muted);
+  margin-bottom: 24px;
+}
+
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dashboard-cta {
+  width: auto;
+  padding: 12px 24px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 480px) {
+  .login-card {
+    padding: 36px 24px 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

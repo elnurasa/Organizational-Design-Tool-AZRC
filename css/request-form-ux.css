@@ -1,0 +1,361 @@
+/**
+ * request-form-ux.css
+ * ---------------------------------------------------------------------------
+ * Visual and guidance layer for the request form (create-request.html).
+ * Loaded after living.css. Presentation only — see js/request-form-ux.js.
+ * ---------------------------------------------------------------------------
+ */
+
+#request-main {
+  counter-reset: q;
+  max-width: 900px;
+}
+
+/* ---------- Stepper: completed steps are clickable ---------- */
+.progress-step.ux-clickable {
+  cursor: pointer;
+}
+
+.progress-step.ux-clickable:hover .step-dot {
+  transform: scale(1.1);
+}
+
+.progress-step .step-dot {
+  transition: transform 0.18s ease, background 0.3s, color 0.3s;
+}
+
+.progress-track {
+  max-width: 820px;
+}
+
+.progress-connector {
+  width: 64px;
+  transition: background 0.4s;
+}
+
+.progress-step.completed + .progress-connector {
+  background: #a8f0b4;
+}
+
+/* ---------- Step 1: read-only profile reads as facts, not as disabled inputs ---------- */
+.info-field input {
+  padding: 0;
+  font-size: 15px;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: default;
+  color: var(--color-text);
+  -webkit-text-fill-color: var(--color-text);
+  opacity: 1;
+}
+
+.info-grid {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px 24px;
+  padding: 20px 22px;
+  background: #f5f9f8;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+}
+
+/* Review step: the same grids are plain text, no tinted box */
+.review-section-title + .info-grid,
+.info-grid + .info-grid {
+  padding: 4px 0 0;
+  background: transparent;
+  border: none;
+}
+
+.review-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ux-edit {
+  padding: 4px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--brand-navy);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 99px;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s;
+}
+
+.ux-edit:hover {
+  background: var(--navy-50);
+  border-color: var(--brand-navy);
+}
+
+/* ---------- Progress meters ---------- */
+.ux-meter,
+.ux-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 6px 0 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.ux-meter-bar {
+  flex: 1;
+  max-width: 260px;
+  height: 6px;
+  border-radius: 9px;
+  background: #e3ece9;
+  overflow: hidden;
+}
+
+.ux-meter-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 9px;
+  background: var(--banner-gradient);
+  transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ux-meter.is-done,
+.ux-progress.is-done {
+  color: var(--color-success);
+}
+
+/* ---------- Form fields ---------- */
+.form-group label {
+  transition: color 0.18s;
+}
+
+.form-group:focus-within label {
+  color: var(--brand-navy);
+}
+
+.form-group.field-error .field-select,
+.form-group.field-error textarea,
+.form-group.field-error input {
+  border-color: #c94a4a;
+  box-shadow: 0 0 0 3px rgba(201, 74, 74, 0.14);
+}
+
+.error-text {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-text:not(.hidden)::before {
+  content: "!";
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-error);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  flex: none;
+}
+
+.question-textarea {
+  transition: border-color 0.18s, box-shadow 0.18s, height 0.12s;
+  overflow: hidden;
+}
+
+.char-count {
+  margin-top: 6px;
+  font-size: 12px;
+  text-align: right;
+  color: var(--color-text-muted);
+}
+
+/* ---------- Step 2: each question is its own numbered card ---------- */
+.question-field {
+  position: relative;
+  margin-bottom: 16px;
+  padding: 20px 22px 18px 68px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+
+.question-field:last-child {
+  margin-bottom: 0;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.question-field::before {
+  counter-increment: q;
+  content: counter(q);
+  position: absolute;
+  left: 20px;
+  top: 19px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e6eeeb;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  transition: background 0.25s, color 0.25s, transform 0.25s;
+}
+
+.question-field:focus-within {
+  border-color: var(--brand-navy);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.12), 0 14px 30px -20px rgba(6, 36, 32, 0.5);
+}
+
+.question-field:focus-within::before {
+  background: var(--brand-navy);
+  color: #ffffff;
+}
+
+.question-field.is-answered {
+  background: #fbfdfc;
+  border-color: #b9dcc8;
+}
+
+.question-field.is-answered::before {
+  content: "✓";
+  background: #3f9a6a;
+  color: #ffffff;
+}
+
+.question-field.field-error {
+  border-color: #e3b3b3;
+  background: #fffafa;
+}
+
+.question-field.field-error::before {
+  background: #c94a4a;
+  color: #ffffff;
+}
+
+.question-label {
+  margin-bottom: 14px;
+}
+
+/* ---------- Step 2: question navigator (wide screens) ---------- */
+.ux-rail {
+  position: fixed;
+  top: 300px;
+  right: max(14px, calc(50% - 450px - 78px));
+  z-index: 15;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 8px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 99px;
+  box-shadow: var(--panel-shadow, 0 18px 40px -30px rgba(6, 36, 32, 0.55));
+}
+
+.ux-rail button {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: #e6eeeb;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, transform 0.15s;
+}
+
+.ux-rail button:hover {
+  transform: scale(1.12);
+  background: #d3e3de;
+}
+
+.ux-rail button.is-answered {
+  background: #3f9a6a;
+  color: #ffffff;
+}
+
+@media (min-width: 1240px) {
+  .ux-rail.is-visible {
+    display: flex;
+  }
+}
+
+/* ---------- Footer: status on the left, actions on the right ---------- */
+.ux-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  min-width: 0;
+}
+
+.ux-status b {
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.ux-status i {
+  font-style: normal;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #b8cbc6;
+}
+
+#next-step-button,
+#submit-button {
+  box-shadow: 0 10px 22px -12px rgba(16, 59, 55, 0.8);
+}
+
+/* ---------- Cards enter one after another ---------- */
+#request-main > .card:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+#request-main > .card:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+@media (max-width: 720px) {
+  .question-field {
+    padding: 62px 16px 16px;
+  }
+  .question-field::before {
+    left: 16px;
+    top: 16px;
+  }
+  .ux-status {
+    display: none;
+  }
+  .sticky-footer {
+    padding: 12px 16px;
+  }
+  .footer-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ux-meter-bar i,
+  .question-field,
+  .question-field::before,
+  .ux-rail button {
+    transition: none;
+  }
+}

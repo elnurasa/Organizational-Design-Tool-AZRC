@@ -1,0 +1,2763 @@
+From 3ab69fab0a4f6fecccfa8f4971e512dbee2f533b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 14 Sep 2026 07:29:49 +0000
+Subject: [PATCH] Move the privileged backend from Apps Script to a Supabase
+ Edge Function
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Azerconnect's corporate proxy blocks the `google-app-script-base`
+application, so script.google.com was unreachable for every user on the
+network. That broke sign-in itself, not just the Admin Panel: role
+resolution ran through the Apps Script Web App, so loginWithPassword()
+failed with "Unable to reach the authorization service" after Supabase had
+already verified the password. No deployment setting could fix it — the
+block is at the network, ahead of the request.
+
+The new admin-api Edge Function answers on the same *.supabase.co origin
+the app already uses for Supabase Auth, which the network demonstrably
+permits (password verification was working throughout).
+
+The port is faithful — same action names, request/response shapes, and
+server-side checks (verify the access token against Supabase itself, then
+re-check admin_permissions for every admin action; never trust a role or
+isAdmin flag from the client). Three things changed deliberately:
+
+- resolveRole moved from GET with the token in the query string to POST
+  with it in the body. The query-string form existed only because Apps
+  Script Web Apps cannot answer a CORS preflight; Edge Functions can.
+- bootstrapAdmin's "already used" guard now asks whether any
+  admin_permissions row exists, rather than reading a script property that
+  has no per-function equivalent. That is the condition it actually
+  protects, and it needs no stored state.
+- debugResolve was not ported. It was a temporary diagnostic that its own
+  comment said to remove once bootstrap was confirmed working.
+
+js/google.js becomes js/backend.js with its public API unchanged, so
+auth.js, app.js and the Admin Panel modules are untouched apart from stale
+references in their doc comments. apps-script/Code.gs is deleted rather
+than left behind, following how this repo retired the dev-mode auth
+provider: one source of truth, with the history in git.
+
+Deploy steps, the reasoning behind --no-verify-jwt, and a one-command
+verification are in supabase/functions/admin-api/README.md. Nothing needs
+configuring: Supabase injects SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+into the function environment, so the service_role key stays out of this
+repository.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_017wiyfPden2U5spFd5GRUrm
+---
+ admin.html                             |    2 +-
+ apps-script/Code.gs                    | 1037 ------------------------
+ bootstrap-setup.html                   |   47 +-
+ bulk-import-managers.html              |    8 +-
+ bulk-reset-passwords.html              |    8 +-
+ index.html                             |    2 +-
+ js/admin/admin-api.js                  |    7 +-
+ js/admin/admin-app.js                  |    2 +-
+ js/admin/admin-table.js                |    6 +-
+ js/admin/constants.js                  |    4 +-
+ js/auth.js                             |   20 +-
+ js/{google.js => backend.js}           |  176 ++--
+ js/config.js                           |   37 +-
+ js/password-rules.js                   |    2 +-
+ supabase/functions/admin-api/README.md |   90 ++
+ supabase/functions/admin-api/index.ts  |  848 +++++++++++++++++++
+ unauthorized.html                      |    2 +-
+ 17 files changed, 1111 insertions(+), 1187 deletions(-)
+ delete mode 100644 apps-script/Code.gs
+ rename js/{google.js => backend.js} (52%)
+ create mode 100644 supabase/functions/admin-api/README.md
+ create mode 100644 supabase/functions/admin-api/index.ts
+
+diff --git a/admin.html b/admin.html
+index 452dd71..125ac03 100644
+--- a/admin.html
++++ b/admin.html
+@@ -58,7 +58,7 @@
+   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+   <script src="js/config.js"></script>
+   <script src="js/supabase-client.js"></script>
+-  <script src="js/google.js"></script>
++  <script src="js/backend.js"></script>
+   <script src="js/auth.js"></script>
+   <script src="js/app.js"></script>
+   <script src="js/password-rules.js"></script>
+diff --git a/apps-script/Code.gs b/apps-script/Code.gs
+deleted file mode 100644
+index 669496e..0000000
+--- a/apps-script/Code.gs
++++ /dev/null
+@@ -1,1037 +0,0 @@
+-/**
+- * Code.gs
+- * ---------------------------------------------------------------------------
+- * Google Apps Script Web App — Authorization + Admin Panel backend for the
+- * Organizational Design Tool.
+- *
+- * DATA SOURCE: every account (Manager/HRBP/OD) lives in one Supabase
+- * Postgres table, "users" (see supabase/migrations/0003_unify_users_and_
+- * requests.sql), keyed by auth.users.id directly (users.id IS the Supabase
+- * Auth user id — no separate join column). This script is the only thing on
+- * Earth allowed to WRITE to "users" or to Supabase Auth: it holds the
+- * Supabase service_role key (via Script Properties, never in source) and
+- * every mutation goes through here after verifying the caller is an Admin.
+- *
+- * The Structural Change Request workflow (requests / request_answers /
+- * request_history) is NOT handled here — those writes need no elevated
+- * privilege (no Supabase Auth involvement), so the browser calls Postgres
+- * functions directly via supabase-js .rpc() under Row Level Security (see
+- * js/request-service.js and supabase/migrations/0004_request_workflow_
+- * rpcs.sql). This script's scope is exactly: sign-in role resolution, and
+- * Admin Panel user CRUD.
+- *
+- * AUTHENTICATION ARCHITECTURE (passwords live in Supabase Auth, NOT here):
+- *
+- * This script never receives, stores, or compares a raw password — Admin
+- * Panel writes hand a password straight through to Supabase Auth's Admin API
+- * (GoTrue), which hashes it. Nothing in the app database ever holds a
+- * password or a hash.
+- *
+- * SERVER-SIDE VERIFICATION: this Web App is deployed with "Anyone" access,
+- * so a caller's email/role/id can never be trusted just because they claim
+- * it. EVERY endpoint requires an `access_token` (a Supabase session access
+- * token, obtained from a successful supabaseClient.auth.signInWithPassword()
+- * — see js/auth.js); getVerifiedUser() confirms it server-side with Supabase
+- * itself (GET {SUPABASE_URL}/auth/v1/user) before doing anything, and every
+- * admin-* action additionally confirms the verified user has an
+- * admin_permissions row (requireAdmin()) — never trusts a role/isAdmin flag
+- * the client sends.
+- *
+- * REQUIRED SCRIPT PROPERTIES (Project Settings -> Script Properties — never
+- * hardcode these, unlike the anon key below, since they grant full database
+- * and Auth admin access):
+- *   SUPABASE_SERVICE_ROLE_KEY  - Project Settings > API > service_role key.
+- *   BOOTSTRAP_KEY               - a one-time secret you choose, used once to
+- *                                  seed the first Admin(s) via bootstrapAdmin.
+- *                                  Delete this property after using it.
+- *
+- * Deployed as a Web App (Deploy > New deployment > Web app):
+- *
+- * doGet():
+- *   - ?resolveRole=1&access_token=... -> the verified caller's PRIMARY role
+- *     plus their Admin permission as a separate flag — Admin never overrides
+- *     the primary role (see resolveAccountRole()). A deactivated
+- *     (is_active = false) account is treated as unauthorized:
+- *       { "authorized": true, "role": "Manager" | "HRBP" | "OD" | "Admin", "isAdmin": boolean }
+- *       { "authorized": false }
+- *     ("Admin" is only ever the role itself for an account with Admin
+- *     permission and no Manager/HRBP/OD row at all — see resolveAccountRole().)
+- *
+- * doPost() actions (all require the caller to be an Admin, except
+- * bootstrapAdmin):
+- *   - adminCreateEmployee { role, full_name, job_title, email, password,
+- *                           company?, division?, department?, subdepartment?,
+- *                           unit?, subunit?, access_token }
+- *   - adminUpdateEmployee { role, id, full_name?, job_title?, email?,
+- *                           password?, company?, division?, department?,
+- *                           subdepartment?, unit?, subunit?, access_token }
+- *   - adminDeleteEmployee { role, id, access_token }
+- *   - adminSetPermission  { auth_user_id, is_admin, access_token }
+- *   - adminSetActive      { role, id, is_active, access_token }
+- *   - bootstrapAdmin      { bootstrap_key, employees: [ { role, full_name,
+- *                           job_title, email, password, ... } ] }
+- *     — one-time seed path, gated by BOOTSTRAP_KEY instead of an admin
+- *     session (there is no admin yet). Refuses to run twice.
+- * ---------------------------------------------------------------------------
+- */
+-
+-// Same Supabase project this app's js/config.js points at (SUPABASE_URL /
+-// SUPABASE_ANON_KEY). The anon/public key is safe here for the same reason
+-// it's safe in a browser bundle: Supabase designs it to be publishable and
+-// non-secret. Used only to verify a caller's access token server-side — see
+-// getVerifiedUser(). Never put the service_role key here — it lives in
+-// Script Properties instead (see getServiceRoleKey()).
+-const SUPABASE_URL = "https://mkgkbqjvywhiginhjyjn.supabase.co";
+-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rZ2ticWp2eXdoaWdpbmhqeWpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0OTU5NTcsImV4cCI6MjEwMTA3MTk1N30.bbgpjDQRMKm77L9EKn9u_0531oZWiQfrnS556sWDjGU";
+-
+-/**
+- * Generates this employee's starting password from their own full_name,
+- * so every newly created account (any role, via handleAdminCreateEmployee
+- * or handleBootstrapAdmin — the Admin Panel's Create form no longer collects
+- * a password) gets a password unique to them instead of one shared default.
+- * It's only ever the STARTING password: Supabase Auth hashes and stores it
+- * exactly like any other password (never written anywhere in plaintext by
+- * this app), and an Admin can overwrite it per-account at any time via Edit,
+- * which immediately invalidates it for that account. Only used when the
+- * caller supplies no password at all.
+- *
+- * Rule: first letter of each of the first three whitespace-separated name
+- * parts, uppercased, + "_123!" — e.g. "Abbasova Irina Vladimirovna" (the
+- * existing full_name convention throughout this app is surname first, given
+- * name, then father's/patronymic name) -> "AIV_123!". The schema has no
+- * separate first/last/father-name columns (see supabase/migrations/0003 —
+- * only one full_name field exists), so this parses that one field rather
+- * than relying on structured fields that don't exist. Parenthetical asides
+- * some employees' names carry (e.g. "Islamova (ex. Allahverdiyeva) Ulviyya
+- * Vahid" for a former/maiden name) are stripped first so they never end up
+- * contributing an initial. Falls back to fewer initials if fewer than three
+- * name parts are present — never zero, since full_name is already required/
+- * non-empty by validateEmployeeInput() before this is ever called.
+- *
+- * @param {string} fullName
+- * @returns {string}
+- */
+-function generateDefaultPassword(fullName) {
+-  const withoutParens = String(fullName || "").replace(/\([^)]*\)/g, " ");
+-  const nameParts = withoutParens.split(/\s+/).filter(Boolean).slice(0, 3);
+-  const initials = nameParts.map((part) => part.charAt(0).toUpperCase()).join("");
+-  return initials + "_123!";
+-}
+-
+-// Role name (as used throughout the client/session, e.g. sessionStorage,
+-// guardPage()) <-> the value stored in users.role. Kept as an explicit
+-// mapping at this one boundary rather than changing the client's role
+-// vocabulary, so nothing outside this file needs to know the DB uses
+-// lowercase/underscored values.
+-const ROLE_TO_DB = { Manager: "manager", HRBP: "hrbp", OD: "od_team" };
+-const DB_TO_ROLE = { manager: "Manager", hrbp: "HRBP", od_team: "OD" };
+-const ROLE_NAMES = Object.keys(ROLE_TO_DB);
+-
+-// Extra fields accepted from the client beyond the shared full_name/
+-// job_title/email/company, whitelisted per role so a caller can never write
+-// an unexpected column just by naming it in the request body.
+-const ROLE_EXTRA_FIELDS = {
+-  Manager: ["division", "department", "subdepartment", "unit", "subunit"],
+-  HRBP: [],
+-  OD: [],
+-};
+-
+-// Extra fields that are REQUIRED (beyond full_name/job_title/email, which
+-// are always required) for each role.
+-const ROLE_REQUIRED_EXTRA_FIELDS = {
+-  Manager: ["division", "department"],
+-  HRBP: [],
+-  OD: [],
+-};
+-
+-/**
+- * Handles GET requests to the deployed web app URL.
+- *
+- * @param {GoogleAppsScript.Events.DoGet} e
+- * @returns {GoogleAppsScript.Content.TextOutput}
+- */
+-function doGet(e) {
+-  const params = (e && e.parameter) || {};
+-
+-  if (params.resolveRole) {
+-    return buildJsonResponse(resolveAccountRole(params.access_token));
+-  }
+-
+-  if (params.debugResolve) {
+-    return buildJsonResponse(debugResolveAccountRole(params.access_token));
+-  }
+-
+-  return buildJsonResponse({ status: "error", message: "Unknown request." });
+-}
+-
+-/**
+- * TEMPORARY diagnostic twin of resolveAccountRole() — returns non-sensitive
+- * structural facts about each step (found/not found, counts, raw role
+- * string) instead of just the final authorized/role/isAdmin answer, to
+- * debug why a real account isn't resolving as expected. Safe to call
+- * unauthenticated (reveals no emails, ids, or secrets) but should be
+- * removed once the bootstrap issue is confirmed fixed.
+- *
+- * @param {string | undefined} accessToken
+- */
+-function debugResolveAccountRole(accessToken) {
+-  const verifiedUser = getVerifiedUser(accessToken);
+-  if (!verifiedUser) {
+-    return Object.assign({ step: "getVerifiedUser", verified: false }, debugGetVerifiedUser(accessToken));
+-  }
+-
+-  const adminRows = restGet(
+-    "admin_permissions",
+-    "auth_user_id=eq." + encodeURIComponent(verifiedUser.id) + "&select=is_admin&limit=1"
+-  );
+-  const userRows = restGet(
+-    "users",
+-    "id=eq." + encodeURIComponent(verifiedUser.id) + "&select=role,is_active&limit=1"
+-  );
+-
+-  return {
+-    verified: true,
+-    adminRowsFound: adminRows ? adminRows.length : null,
+-    isAdminRaw: adminRows && adminRows.length > 0 ? adminRows[0].is_admin : null,
+-    userRowsFound: userRows ? userRows.length : null,
+-    userRoleRaw: userRows && userRows.length > 0 ? userRows[0].role : null,
+-    userIsActiveRaw: userRows && userRows.length > 0 ? userRows[0].is_active : null,
+-    roleMapsToKnownRole: userRows && userRows.length > 0 ? !!DB_TO_ROLE[userRows[0].role] : null,
+-  };
+-}
+-
+-/**
+- * Handles POST requests. Dispatches on body.action.
+- *
+- * @param {GoogleAppsScript.Events.DoPost} e
+- * @returns {GoogleAppsScript.Content.TextOutput}
+- */
+-function doPost(e) {
+-  let body;
+-  try {
+-    body = JSON.parse((e && e.postData && e.postData.contents) || "{}");
+-  } catch (parseError) {
+-    return buildJsonResponse({ status: "error", message: "Invalid request body." });
+-  }
+-
+-  switch (body.action) {
+-    case "adminCreateEmployee":
+-      return buildJsonResponse(handleAdminCreateEmployee(body));
+-    case "adminUpdateEmployee":
+-      return buildJsonResponse(handleAdminUpdateEmployee(body));
+-    case "adminDeleteEmployee":
+-      return buildJsonResponse(handleAdminDeleteEmployee(body));
+-    case "adminSetPermission":
+-      return buildJsonResponse(handleAdminSetPermission(body));
+-    case "adminSetActive":
+-      return buildJsonResponse(handleAdminSetActive(body));
+-    case "bootstrapAdmin":
+-      return buildJsonResponse(handleBootstrapAdmin(body));
+-    default:
+-      return buildJsonResponse({ status: "error", message: "Unknown action." });
+-  }
+-}
+-
+-// =============================================================================
+-// Auth verification
+-// =============================================================================
+-
+-/**
+- * Verifies a Supabase access token server-side by asking Supabase itself who
+- * it belongs to, rather than trusting any email/id the caller claims. Fails
+- * closed (returns null) on a missing token, missing config, an invalid/
+- * expired token, or any network error.
+- *
+- * @param {string | undefined} accessToken
+- * @returns {{email: string, id: string} | null}
+- */
+-function getVerifiedUser(accessToken) {
+-  if (!accessToken) return null;
+-  if (!isConfigured(SUPABASE_URL)) return null;
+-
+-  try {
+-    const response = UrlFetchApp.fetch(SUPABASE_URL.replace(/\/+$/, "") + "/auth/v1/user", {
+-      method: "get",
+-      headers: {
+-        Authorization: "Bearer " + accessToken,
+-        // Uses the service_role key (not the public anon key) as the apikey
+-        // header — Supabase's gateway was rejecting this endpoint's calls
+-        // from Apps Script's server with the anon key specifically ("Invalid
+-        // API key") even though the same key works fine called directly and
+-        // the service_role key already works reliably from this same script
+-        // for every other Supabase call (see restGet/restPost below). Still
+-        // safe: this only ever confirms who a token belongs to, the same
+-        // thing the anon key would have done — no elevated action is taken
+-        // based on the response beyond that.
+-        apikey: getServiceRoleKey(),
+-      },
+-      muteHttpExceptions: true,
+-    });
+-
+-    if (response.getResponseCode() !== 200) return null;
+-
+-    const user = JSON.parse(response.getContentText());
+-    if (!user || !user.email || !user.id) return null;
+-
+-    return { email: String(user.email).trim().toLowerCase(), id: user.id };
+-  } catch (error) {
+-    return null;
+-  }
+-}
+-
+-/**
+- * TEMPORARY diagnostic twin of getVerifiedUser() — reports the actual HTTP
+- * status and a truncated response body from Supabase, plus basic facts
+- * about the token itself (never the token value), to see exactly why
+- * verification is failing. Remove once the bootstrap issue is fixed.
+- *
+- * @param {string | undefined} accessToken
+- */
+-function debugGetVerifiedUser(accessToken) {
+-  if (!accessToken) return { tokenPresent: false };
+-  if (!isConfigured(SUPABASE_URL) || !isConfigured(SUPABASE_ANON_KEY)) {
+-    return { tokenPresent: true, configOk: false };
+-  }
+-
+-  const base = SUPABASE_URL.replace(/\/+$/, "");
+-  const result = {
+-    tokenPresent: true,
+-    tokenLength: String(accessToken).length,
+-    anonKeyLength: SUPABASE_ANON_KEY.length,
+-    anonKeyPrefix: SUPABASE_ANON_KEY.slice(0, 15),
+-    anonKeySuffix: SUPABASE_ANON_KEY.slice(-15),
+-  };
+-
+-  try {
+-    const response = UrlFetchApp.fetch(base + "/auth/v1/user", {
+-      method: "get",
+-      headers: { Authorization: "Bearer " + accessToken, apikey: SUPABASE_ANON_KEY },
+-      muteHttpExceptions: true,
+-    });
+-    result.headerAttempt = {
+-      httpCode: response.getResponseCode(),
+-      bodySnippet: String(response.getContentText()).slice(0, 200),
+-    };
+-  } catch (error) {
+-    result.headerAttempt = { fetchError: String(error) };
+-  }
+-
+-  try {
+-    const response2 = UrlFetchApp.fetch(base + "/auth/v1/user?apikey=" + encodeURIComponent(SUPABASE_ANON_KEY), {
+-      method: "get",
+-      headers: { Authorization: "Bearer " + accessToken },
+-      muteHttpExceptions: true,
+-    });
+-    result.queryParamAttempt = {
+-      httpCode: response2.getResponseCode(),
+-      bodySnippet: String(response2.getContentText()).slice(0, 200),
+-    };
+-  } catch (error) {
+-    result.queryParamAttempt = { fetchError: String(error) };
+-  }
+-
+-  try {
+-    const response3 = UrlFetchApp.fetch(base + "/auth/v1/user", {
+-      method: "get",
+-      headers: { Authorization: "Bearer " + accessToken, apikey: getServiceRoleKey() },
+-      muteHttpExceptions: true,
+-    });
+-    result.serviceRoleAttempt = {
+-      httpCode: response3.getResponseCode(),
+-      bodySnippet: String(response3.getContentText()).slice(0, 200),
+-    };
+-  } catch (error) {
+-    result.serviceRoleAttempt = { fetchError: String(error) };
+-  }
+-
+-  return result;
+-}
+-
+-/**
+- * Verifies the access token AND that the resulting user has an
+- * admin_permissions row with is_admin = true. This is the gate every
+- * admin-* action must pass before touching any data.
+- *
+- * @param {string | undefined} accessToken
+- * @returns {{email: string, id: string} | null} the verified admin, or null.
+- */
+-function requireAdmin(accessToken) {
+-  const verifiedUser = getVerifiedUser(accessToken);
+-  if (!verifiedUser) return null;
+-
+-  const rows = restGet("admin_permissions", "auth_user_id=eq." + encodeURIComponent(verifiedUser.id) + "&select=is_admin");
+-  if (!rows || rows.length === 0 || !rows[0].is_admin) return null;
+-
+-  return verifiedUser;
+-}
+-
+-function isConfigured(value) {
+-  return !!value && String(value).indexOf("PASTE_") !== 0;
+-}
+-
+-function getServiceRoleKey() {
+-  return PropertiesService.getScriptProperties().getProperty("SUPABASE_SERVICE_ROLE_KEY");
+-}
+-
+-function getBootstrapKey() {
+-  return PropertiesService.getScriptProperties().getProperty("BOOTSTRAP_KEY");
+-}
+-
+-/**
+- * Decodes a base64 string back to plain text. The browser side base64-
+- * encodes email/password/bootstrap_key before sending them here — some
+- * corporate network security tools inspect outgoing requests for a
+- * plaintext "your own corporate email + a password" pair (a known
+- * credential-phishing pattern) and block ones sent to script.google.com,
+- * even though this is a legitimate first-party request. Encoding avoids
+- * that false-positive block; it is not a security boundary (this endpoint
+- * is only ever reached over HTTPS).
+- *
+- * @param {string | undefined} value
+- * @returns {string | undefined}
+- */
+-function b64Decode(value) {
+-  if (value === undefined || value === null || value === "") return value;
+-  try {
+-    return Utilities.newBlob(Utilities.base64Decode(String(value))).getDataAsString("UTF-8");
+-  } catch (e) {
+-    return value; // not valid base64 — pass through unchanged
+-  }
+-}
+-
+-// =============================================================================
+-// Sign In
+-// =============================================================================
+-
+-/**
+- * Resolves the ROLE for an already-authenticated caller (a valid
+- * access_token means Supabase Auth already confirmed the password —
+- * this function only ever answers "what is this verified person allowed to
+- * see", never "is this password correct").
+- *
+- * Admin permission is orthogonal to the primary role, not a replacement for
+- * it: an account with both a users row AND an admin_permissions row gets
+- * back its PRIMARY role (Manager/HRBP/OD) plus isAdmin: true as a separate
+- * field — Admin never overrides the primary role as the post-login landing
+- * page (see js/auth.js's loginWithPassword()/ROLE_REDIRECT_MAP and
+- * app.js's guardPage("Admin"), which gates the Admin Panel on the isAdmin
+- * flag, not on role === "Admin"). "Admin" is only ever the role itself for
+- * an account with no primary Manager/HRBP/OD row at all. A deactivated
+- * account (is_active = false) is treated as unauthorized, same as a non-
+- * existent one — it deliberately doesn't get a distinct "deactivated"
+- * message, so this endpoint can't be used to probe whether a given email is
+- * a real, disabled account.
+- *
+- * @param {string | undefined} accessToken
+- * @returns {{authorized: boolean, role?: "Admin"|"Manager"|"HRBP"|"OD", isAdmin?: boolean}}
+- */
+-function resolveAccountRole(accessToken) {
+-  const verifiedUser = getVerifiedUser(accessToken);
+-  if (!verifiedUser) return { authorized: false };
+-
+-  const adminRows = restGet(
+-    "admin_permissions",
+-    "auth_user_id=eq." + encodeURIComponent(verifiedUser.id) + "&select=is_admin&limit=1"
+-  );
+-  const isAdmin = !!(adminRows && adminRows.length > 0 && adminRows[0].is_admin);
+-
+-  const userRows = restGet(
+-    "users",
+-    "id=eq." + encodeURIComponent(verifiedUser.id) + "&select=role,is_active&limit=1"
+-  );
+-  if (userRows && userRows.length > 0 && userRows[0].is_active && DB_TO_ROLE[userRows[0].role]) {
+-    // Admin permission is orthogonal to the primary role — it must never
+-    // override it as the post-login landing page (only grant the Admin
+-    // Panel button/route). See js/auth.js's loginWithPassword() and
+-    // js/app.js's guardPage("Admin"), which already expect {role, isAdmin}
+-    // as separate fields, not "Admin" itself as a role value.
+-    return { authorized: true, role: DB_TO_ROLE[userRows[0].role], isAdmin: isAdmin };
+-  }
+-
+-  if (isAdmin) {
+-    // Admin permission with no primary Manager/HRBP/OD row at all (e.g. a
+-    // pure-Admin account, same shape as elnurasa@ in the dev-mode
+-    // directory) — "Admin" is the only role available to land on.
+-    return { authorized: true, role: "Admin", isAdmin: true };
+-  }
+-
+-  // A real, password-verified Supabase Auth user with no active users row
+-  // and no admin_permissions row — e.g. deleted/deactivated from the Admin
+-  // Panel after their session token was issued. Deny; js/auth.js signs
+-  // them out.
+-  return { authorized: false };
+-}
+-
+-// =============================================================================
+-// Admin Panel write actions
+-// =============================================================================
+-
+-/**
+- * Creates a new Manager/HRBP/OD account: a Supabase Auth user (with the
+- * Admin-supplied password) plus the matching "users" row, using the same id
+- * for both. If the table insert fails after the Auth user was created, the
+- * Auth user is deleted again so no orphaned login is left behind.
+- *
+- * @param {object} body
+- * @returns {{status: "success", id: string} | {status: "error", message: string}}
+- */
+-function handleAdminCreateEmployee(body) {
+-  const admin = requireAdmin(body.access_token);
+-  if (!admin) return { status: "error", message: "Unauthorized." };
+-
+-  const role = body.role;
+-  if (ROLE_NAMES.indexOf(role) === -1) {
+-    return { status: "error", message: "Unknown role." };
+-  }
+-
+-  const decodedBody = Object.assign({}, body, {
+-    email: b64Decode(body.email),
+-    password: b64Decode(body.password) || generateDefaultPassword(body.full_name),
+-  });
+-
+-  const validationError = validateEmployeeInput(role, decodedBody, /* passwordRequired */ true);
+-  if (validationError) return { status: "error", message: validationError };
+-
+-  const email = String(decodedBody.email).trim().toLowerCase();
+-
+-  const authResult = authAdminCreateUser(email, decodedBody.password);
+-  if (authResult.error) {
+-    return { status: "error", message: authResult.error };
+-  }
+-
+-  const row = buildEmployeeRow(role, decodedBody, email);
+-  row.id = authResult.userId;
+-  const insertResult = restPost("users", row);
+-
+-  if (insertResult.error) {
+-    authAdminDeleteUser(authResult.userId); // best-effort cleanup, don't leak a login with no profile
+-    return { status: "error", message: friendlyTableError(insertResult.error) };
+-  }
+-
+-  return { status: "success", id: insertResult.data[0].id };
+-}
+-
+-/**
+- * Updates an existing user row. If a new password is supplied, updates the
+- * linked Supabase Auth user's password too; if the email changed, updates
+- * the Auth user's email as well so sign-in keeps matching.
+- *
+- * @param {object} body
+- * @returns {{status: "success"} | {status: "error", message: string}}
+- */
+-function handleAdminUpdateEmployee(body) {
+-  const admin = requireAdmin(body.access_token);
+-  if (!admin) return { status: "error", message: "Unauthorized." };
+-
+-  const role = body.role;
+-  if (ROLE_NAMES.indexOf(role) === -1) {
+-    return { status: "error", message: "Unknown role." };
+-  }
+-  if (!body.id) {
+-    return { status: "error", message: "Missing employee id." };
+-  }
+-
+-  const decodedBody = Object.assign({}, body, {
+-    email: b64Decode(body.email),
+-    password: b64Decode(body.password),
+-  });
+-
+-  const validationError = validateEmployeeInput(role, decodedBody, /* passwordRequired */ false);
+-  if (validationError) return { status: "error", message: validationError };
+-
+-  const existingRows = restGet("users", "id=eq." + encodeURIComponent(body.id) + "&select=email&limit=1");
+-  if (!existingRows || existingRows.length === 0) {
+-    return { status: "error", message: "Employee not found." };
+-  }
+-  const existing = existingRows[0];
+-  const newEmail = decodedBody.email ? String(decodedBody.email).trim().toLowerCase() : existing.email;
+-
+-  if (decodedBody.password || newEmail !== existing.email) {
+-    const authUpdate = {};
+-    if (decodedBody.password) authUpdate.password = decodedBody.password;
+-    if (newEmail !== existing.email) authUpdate.email = newEmail;
+-
+-    const authResult = authAdminUpdateUser(body.id, authUpdate);
+-    if (authResult.error) {
+-      return { status: "error", message: authResult.error };
+-    }
+-  }
+-
+-  const row = buildEmployeeRow(role, decodedBody, newEmail);
+-  const updateResult = restPatch("users", "id=eq." + encodeURIComponent(body.id), row);
+-
+-  if (updateResult.error) {
+-    return { status: "error", message: friendlyTableError(updateResult.error) };
+-  }
+-
+-  return { status: "success" };
+-}
+-
+-/**
+- * Deletes a user row and its linked Supabase Auth user.
+- *
+- * @param {object} body
+- * @returns {{status: "success"} | {status: "error", message: string}}
+- */
+-function handleAdminDeleteEmployee(body) {
+-  const admin = requireAdmin(body.access_token);
+-  if (!admin) return { status: "error", message: "Unauthorized." };
+-
+-  if (!body.id) {
+-    return { status: "error", message: "Missing employee id." };
+-  }
+-
+-  const existingRows = restGet("users", "id=eq." + encodeURIComponent(body.id) + "&select=id&limit=1");
+-  if (!existingRows || existingRows.length === 0) {
+-    return { status: "error", message: "Employee not found." };
+-  }
+-
+-  const deleteResult = restDelete("users", "id=eq." + encodeURIComponent(body.id));
+-  if (deleteResult.error) {
+-    return { status: "error", message: friendlyTableError(deleteResult.error) };
+-  }
+-
+-  authAdminDeleteUser(body.id); // best-effort; the row is already gone either way
+-
+-  return { status: "success" };
+-}
+-
+-/**
+- * Grants or revokes Admin permission for a Supabase Auth user id. An Admin
+- * may not remove their own permission — otherwise a lone Admin could lock
+- * everyone (including themselves) out with no one left to undo it.
+- *
+- * @param {{auth_user_id: string, is_admin: boolean, access_token: string}} body
+- * @returns {{status: "success"} | {status: "error", message: string}}
+- */
+-function handleAdminSetPermission(body) {
+-  const admin = requireAdmin(body.access_token);
+-  if (!admin) return { status: "error", message: "Unauthorized." };
+-
+-  const targetUserId = body.auth_user_id;
+-  const grantAdmin = !!body.is_admin;
+-
+-  if (!targetUserId) {
+-    return { status: "error", message: "Missing auth_user_id." };
+-  }
+-  if (!grantAdmin && targetUserId === admin.id) {
+-    return { status: "error", message: "You cannot remove your own Admin permission." };
+-  }
+-
+-  const upsertResult = restPost(
+-    "admin_permissions",
+-    { auth_user_id: targetUserId, is_admin: grantAdmin, granted_by: admin.id, granted_at: new Date().toISOString() },
+-    { Prefer: "return=representation,resolution=merge-duplicates" }
+-  );
+-
+-  if (upsertResult.error) {
+-    return { status: "error", message: friendlyTableError(upsertResult.error) };
+-  }
+-
+-  return { status: "success" };
+-}
+-
+-/**
+- * Activates or deactivates a user. A deactivated account is denied at Sign
+- * In (see resolveAccountRole()) but its Supabase Auth user and users row
+- * are left intact — unlike Delete, this is reversible. An Admin may not
+- * deactivate their own account, for the same lockout reason as
+- * handleAdminSetPermission.
+- *
+- * @param {{role: string, id: string, is_active: boolean, access_token: string}} body
+- * @returns {{status: "success"} | {status: "error", message: string}}
+- */
+-function handleAdminSetActive(body) {
+-  const admin = requireAdmin(body.access_token);
+-  if (!admin) return { status: "error", message: "Unauthorized." };
+-
+-  if (!body.id) {
+-    return { status: "error", message: "Missing employee id." };
+-  }
+-  const setActive = !!body.is_active;
+-  if (!setActive && body.id === admin.id) {
+-    return { status: "error", message: "You cannot deactivate your own account." };
+-  }
+-
+-  const updateResult = restPatch("users", "id=eq." + encodeURIComponent(body.id), { is_active: setActive });
+-  if (updateResult.error) {
+-    return { status: "error", message: friendlyTableError(updateResult.error) };
+-  }
+-
+-  return { status: "success" };
+-}
+-
+-/**
+- * One-time seed path: creates the given employees as Admins. Gated by
+- * BOOTSTRAP_KEY (a Script Property you set yourself) rather than an admin
+- * session, since no Admin exists yet the first time this runs. Refuses to
+- * run a second time (BOOTSTRAP_USED property) even with a correct key —
+- * delete BOOTSTRAP_KEY once you've used this so it can never run again.
+- *
+- * @param {{bootstrap_key: string, employees: Array<object>}} body
+- * @returns {{status: "success", results: Array} | {status: "error", message: string}}
+- */
+-function handleBootstrapAdmin(body) {
+-  const configuredKey = getBootstrapKey();
+-  if (!configuredKey) {
+-    return { status: "error", message: "Bootstrap is not enabled (no BOOTSTRAP_KEY script property set)." };
+-  }
+-  if (PropertiesService.getScriptProperties().getProperty("BOOTSTRAP_USED") === "true") {
+-    return { status: "error", message: "Bootstrap has already been used." };
+-  }
+-  const suppliedKey = b64Decode(body.bootstrap_key);
+-  if (String(suppliedKey || "") !== configuredKey) {
+-    return { status: "error", message: "Invalid bootstrap key." };
+-  }
+-  if (!Array.isArray(body.employees) || body.employees.length === 0) {
+-    return { status: "error", message: "No employees supplied." };
+-  }
+-
+-  const results = body.employees.map((employee) => {
+-    const role = employee.role;
+-    if (ROLE_NAMES.indexOf(role) === -1) {
+-      return { email: employee.email, status: "error", message: "Unknown role." };
+-    }
+-
+-    const decodedEmployee = Object.assign({}, employee, {
+-      email: b64Decode(employee.email),
+-      password: b64Decode(employee.password) || generateDefaultPassword(employee.full_name),
+-    });
+-
+-    const validationError = validateEmployeeInput(role, decodedEmployee, /* passwordRequired */ true);
+-    if (validationError) return { email: decodedEmployee.email, status: "error", message: validationError };
+-
+-    const email = String(decodedEmployee.email).trim().toLowerCase();
+-    const authResult = authAdminCreateUser(email, decodedEmployee.password);
+-    if (authResult.error) return { email: email, status: "error", message: authResult.error };
+-
+-    const row = buildEmployeeRow(role, decodedEmployee, email);
+-    row.id = authResult.userId;
+-    const insertResult = restPost("users", row);
+-    if (insertResult.error) {
+-      authAdminDeleteUser(authResult.userId);
+-      return { email: email, status: "error", message: friendlyTableError(insertResult.error) };
+-    }
+-
+-    const permissionResult = restPost("admin_permissions", {
+-      auth_user_id: authResult.userId,
+-      is_admin: true,
+-      granted_by: null,
+-      granted_at: new Date().toISOString(),
+-    });
+-    if (permissionResult.error) {
+-      return { email: email, status: "error", message: friendlyTableError(permissionResult.error) };
+-    }
+-
+-    return { email: email, status: "success" };
+-  });
+-
+-  // Only lock the one-time bootstrap path once it actually created at least
+-  // one account — a run where every employee failed (e.g. a misconfigured
+-  // Script Property) must stay retryable, not burn the only attempt.
+-  const anySuccess = results.some((result) => result.status === "success");
+-  if (anySuccess) {
+-    PropertiesService.getScriptProperties().setProperty("BOOTSTRAP_USED", "true");
+-  }
+-  return { status: "success", results: results };
+-}
+-
+-// =============================================================================
+-// Validation
+-// =============================================================================
+-
+-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+-
+-/**
+- * Validates the shared + role-specific fields for a create/update request.
+- *
+- * @param {string} role
+- * @param {object} input
+- * @param {boolean} passwordRequired
+- * @returns {string | null} an error message, or null if valid.
+- */
+-function validateEmployeeInput(role, input, passwordRequired) {
+-  if (!input.full_name || !String(input.full_name).trim()) return "Full name is required.";
+-  if (!input.job_title || !String(input.job_title).trim()) return "Job title is required.";
+-  if (!input.email || !EMAIL_REGEX.test(String(input.email).trim())) return "A valid email is required.";
+-
+-  const requiredExtras = ROLE_REQUIRED_EXTRA_FIELDS[role] || [];
+-  for (let i = 0; i < requiredExtras.length; i++) {
+-    const field = requiredExtras[i];
+-    if (!input[field] || !String(input[field]).trim()) {
+-      return capitalize(field) + " is required.";
+-    }
+-  }
+-
+-  if (passwordRequired && !input.password) return "Password is required.";
+-  if (input.password) {
+-    const rules = checkPasswordRulesServer(input.password);
+-    if (!rules.allValid) {
+-      return "Password must be at least 6 characters and include a letter, a number, and a special character.";
+-    }
+-  }
+-
+-  return null;
+-}
+-
+-/**
+- * Mirrors js/password-rules.js's checkPasswordRules() — kept in sync
+- * deliberately since this is the server-side re-check for Admin-set
+- * passwords (never trust client-side validation alone).
+- *
+- * @param {string} password
+- * @returns {{allValid: boolean}}
+- */
+-function checkPasswordRulesServer(password) {
+-  const value = password || "";
+-  const minLength = value.length >= 6;
+-  const hasLetter = /[a-zA-Z]/.test(value);
+-  const hasNumber = /[0-9]/.test(value);
+-  const hasSpecial = /[^a-zA-Z0-9]/.test(value);
+-  return { allValid: minLength && hasLetter && hasNumber && hasSpecial };
+-}
+-
+-function capitalize(text) {
+-  return text.charAt(0).toUpperCase() + text.slice(1);
+-}
+-
+-/**
+- * Builds the row payload to send to PostgREST from a create/update request,
+- * whitelisted to exactly the columns "users" has. Does not set "id" — the
+- * two callers (create vs. update) attach it differently (a freshly created
+- * Auth user id vs. the existing row's id in the URL path).
+- *
+- * @param {string} role
+- * @param {object} input
+- * @param {string} email
+- * @returns {object}
+- */
+-function buildEmployeeRow(role, input, email) {
+-  const row = {
+-    full_name: String(input.full_name).trim(),
+-    job_title: String(input.job_title).trim(),
+-    email: email,
+-    role: ROLE_TO_DB[role],
+-  };
+-
+-  if (input.company !== undefined) {
+-    row.company = input.company === "" ? null : String(input.company).trim();
+-  }
+-
+-  (ROLE_EXTRA_FIELDS[role] || []).forEach((field) => {
+-    if (input[field] !== undefined) {
+-      row[field] = input[field] === "" ? null : String(input[field]).trim();
+-    }
+-  });
+-
+-  return row;
+-}
+-
+-/**
+- * Turns a raw PostgREST error into a message safe/useful to show an Admin,
+- * recognizing the common "unique constraint violated" case (duplicate
+- * email).
+- *
+- * @param {string} rawMessage
+- * @returns {string}
+- */
+-function friendlyTableError(rawMessage) {
+-  const text = String(rawMessage || "");
+-  if (text.indexOf("duplicate key") !== -1 && text.indexOf("email") !== -1) {
+-    return "This email is already in use.";
+-  }
+-  if (text.indexOf("violates foreign key constraint") !== -1) {
+-    return "This person can't be deleted because they have existing requests or history linked to their account. Use the Status toggle to deactivate them instead.";
+-  }
+-  return "Could not save the record. Please try again.";
+-}
+-
+-// =============================================================================
+-// Supabase REST (PostgREST) + Auth Admin API helpers — all use the
+-// service_role key, so every response here bypasses Row Level Security.
+-// Only ever call these from code that has already checked the CALLER's
+-// permissions itself (requireAdmin() / resolveAccountRole() above).
+-// =============================================================================
+-
+-function restGet(table, queryString) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + table + "?" + queryString;
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "get",
+-    headers: serviceRoleHeaders(),
+-    muteHttpExceptions: true,
+-  });
+-
+-  if (response.getResponseCode() >= 300) return [];
+-  try {
+-    return JSON.parse(response.getContentText());
+-  } catch (error) {
+-    return [];
+-  }
+-}
+-
+-function restPost(table, row, extraHeaders) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + table;
+-  const headers = serviceRoleHeaders();
+-  headers["Content-Type"] = "application/json";
+-  headers["Prefer"] = "return=representation";
+-  Object.assign(headers, extraHeaders || {});
+-
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "post",
+-    headers: headers,
+-    payload: JSON.stringify(row),
+-    muteHttpExceptions: true,
+-  });
+-
+-  return parseWriteResponse(response);
+-}
+-
+-function restPatch(table, queryString, fields) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + table + "?" + queryString;
+-  const headers = serviceRoleHeaders();
+-  headers["Content-Type"] = "application/json";
+-  headers["Prefer"] = "return=representation";
+-
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "patch",
+-    headers: headers,
+-    payload: JSON.stringify(fields),
+-    muteHttpExceptions: true,
+-  });
+-
+-  return parseWriteResponse(response);
+-}
+-
+-function restDelete(table, queryString) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/rest/v1/" + table + "?" + queryString;
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "delete",
+-    headers: serviceRoleHeaders(),
+-    muteHttpExceptions: true,
+-  });
+-
+-  return parseWriteResponse(response);
+-}
+-
+-function parseWriteResponse(response) {
+-  const code = response.getResponseCode();
+-  if (code >= 300) {
+-    let message = response.getContentText();
+-    try {
+-      const parsed = JSON.parse(message);
+-      message = parsed.message || parsed.msg || message;
+-    } catch (parseError) {
+-      // keep raw text
+-    }
+-    return { error: message };
+-  }
+-
+-  try {
+-    return { data: JSON.parse(response.getContentText()) };
+-  } catch (parseError) {
+-    return { data: [] };
+-  }
+-}
+-
+-function serviceRoleHeaders() {
+-  const key = getServiceRoleKey();
+-  return { apikey: key, Authorization: "Bearer " + key };
+-}
+-
+-/**
+- * Creates a Supabase Auth user with a password already set and the email
+- * pre-confirmed (Admin-created accounts should be usable immediately, no
+- * separate email verification step).
+- *
+- * @param {string} email
+- * @param {string} password
+- * @returns {{userId: string} | {error: string}}
+- */
+-function authAdminCreateUser(email, password) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/auth/v1/admin/users";
+-  const headers = serviceRoleHeaders();
+-  headers["Content-Type"] = "application/json";
+-
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "post",
+-    headers: headers,
+-    payload: JSON.stringify({ email: email, password: password, email_confirm: true }),
+-    muteHttpExceptions: true,
+-  });
+-
+-  const code = response.getResponseCode();
+-  const body = safeParseJson(response.getContentText());
+-
+-  if (code >= 300) {
+-    const message = (body && (body.msg || body.error_description || body.message)) || "Could not create account.";
+-    const friendly = /registered|exists/i.test(message) ? "This email is already in use." : message;
+-    return { error: friendly };
+-  }
+-
+-  return { userId: body.id };
+-}
+-
+-/**
+- * @param {string} userId
+- * @param {{password?: string, email?: string}} fields
+- * @returns {{ok: true} | {error: string}}
+- */
+-function authAdminUpdateUser(userId, fields) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/auth/v1/admin/users/" + encodeURIComponent(userId);
+-  const headers = serviceRoleHeaders();
+-  headers["Content-Type"] = "application/json";
+-
+-  const response = UrlFetchApp.fetch(url, {
+-    method: "put",
+-    headers: headers,
+-    payload: JSON.stringify(fields),
+-    muteHttpExceptions: true,
+-  });
+-
+-  const code = response.getResponseCode();
+-  if (code >= 300) {
+-    const body = safeParseJson(response.getContentText());
+-    const message = (body && (body.msg || body.error_description || body.message)) || "Could not update account.";
+-    const friendly = /registered|exists/i.test(message) ? "This email is already in use." : message;
+-    return { error: friendly };
+-  }
+-
+-  return { ok: true };
+-}
+-
+-/**
+- * @param {string} userId
+- */
+-function authAdminDeleteUser(userId) {
+-  const url = SUPABASE_URL.replace(/\/+$/, "") + "/auth/v1/admin/users/" + encodeURIComponent(userId);
+-  UrlFetchApp.fetch(url, {
+-    method: "delete",
+-    headers: serviceRoleHeaders(),
+-    muteHttpExceptions: true,
+-  });
+-}
+-
+-function safeParseJson(text) {
+-  try {
+-    return JSON.parse(text);
+-  } catch (error) {
+-    return null;
+-  }
+-}
+-
+-/**
+- * Wraps a JS value as a JSON TextOutput response. See the note in the
+- * original version of this file (preserved here) on why POSTs from the
+- * client use Content-Type "text/plain": Apps Script Web Apps cannot answer
+- * a CORS preflight (OPTIONS) request, so keeping requests as CORS "simple
+- * requests" (GET, or POST with text/plain) is what lets fetch() from the
+- * browser work at all against this endpoint.
+- *
+- * @param {*} data
+- * @returns {GoogleAppsScript.Content.TextOutput}
+- */
+-function buildJsonResponse(data) {
+-  return ContentService
+-    .createTextOutput(JSON.stringify(data))
+-    .setMimeType(ContentService.MimeType.JSON);
+-}
+diff --git a/bootstrap-setup.html b/bootstrap-setup.html
+index 058a094..338b0d8 100644
+--- a/bootstrap-setup.html
++++ b/bootstrap-setup.html
+@@ -21,12 +21,12 @@
+   <h1>One-Time Admin Account Setup</h1>
+   <p class="hint">
+     This page runs once to create the first OD Admin account. It talks directly
+-    to your Apps Script and Supabase project — nothing you type here is sent
++    to your Supabase project — nothing you type here is sent
+     anywhere else. You can delete this file when you're done.
+   </p>
+ 
+   <form id="setupForm">
+-    <label for="bootstrapKey">Bootstrap Key (the one you just set in Apps Script)</label>
++    <label for="bootstrapKey">Bootstrap Key (the BOOTSTRAP_KEY secret you set on the admin-api function)</label>
+     <input id="bootstrapKey" type="password" autocomplete="off" required />
+ 
+     <label for="fullName">Full Name</label>
+@@ -113,9 +113,9 @@
+       try {
+         let bootstrapResp;
+         try {
+-          bootstrapResp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
++          bootstrapResp = await fetch(CONFIG.ADMIN_API_URL, {
+             method: "POST",
+-            headers: { "Content-Type": "text/plain;charset=utf-8" },
++            headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({
+               action: "bootstrapAdmin",
+               bootstrap_key: b64Encode(bootstrapKey),
+@@ -123,7 +123,7 @@
+             }),
+           }).then((r) => r.json());
+         } catch (e) {
+-          showResult("err", "Step 1 (creating account) could not reach Google Apps Script: " + e.message, `RESULT: FAILED - step1 - ${e.message}`);
++          showResult("err", "Step 1 (creating account) could not reach the admin-api Edge Function: " + e.message, `RESULT: FAILED - step1 - ${e.message}`);
+           return;
+         }
+ 
+@@ -153,11 +153,13 @@
+ 
+         let roleResp;
+         try {
+-          roleResp = await fetch(
+-            `${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+-          ).then((r) => r.json());
++          roleResp = await fetch(CONFIG.ADMIN_API_URL, {
++            method: "POST",
++            headers: { "Content-Type": "application/json" },
++            body: JSON.stringify({ action: "resolveRole", access_token: signInResp.access_token }),
++          }).then((r) => r.json());
+         } catch (e) {
+-          showResult("err", "Step 3 (role check) could not reach Google Apps Script: " + e.message, `RESULT: FAILED - step3 - ${e.message}`);
++          showResult("err", "Step 3 (role check) could not reach the admin-api Edge Function: " + e.message, `RESULT: FAILED - step3 - ${e.message}`);
+           return;
+         }
+ 
+@@ -190,7 +192,11 @@
+       testGetBtn.disabled = true;
+       showTestResult("ok", "Testing...");
+       try {
+-        const resp = await fetch(`${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=diagnostic-test`, { method: "GET" });
++        const resp = await fetch(CONFIG.ADMIN_API_URL, {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ action: "resolveRole", access_token: "diagnostic-test" }),
++        });
+         const text = await resp.text();
+         showTestResult("ok", "Test A result: SUCCESS — received: " + text);
+       } catch (e) {
+@@ -204,9 +210,9 @@
+       testPostBtn.disabled = true;
+       showTestResult("ok", "Testing...");
+       try {
+-        const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
++        const resp = await fetch(CONFIG.ADMIN_API_URL, {
+           method: "POST",
+-          headers: { "Content-Type": "text/plain;charset=utf-8" },
++          headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({ action: "__diagnostic_test__" }),
+         });
+         const text = await resp.text();
+@@ -223,9 +229,9 @@
+       testPostBtn2.disabled = true;
+       showTestResult("ok", "Testing...");
+       try {
+-        const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
++        const resp = await fetch(CONFIG.ADMIN_API_URL, {
+           method: "POST",
+-          headers: { "Content-Type": "text/plain;charset=utf-8" },
++          headers: { "Content-Type": "application/json" },
+           body: JSON.stringify({
+             action: "__diagnostic_test__",
+             bootstrap_key: "placeholder",
+@@ -267,17 +273,16 @@
+           return;
+         }
+ 
+-        const roleResp = await fetch(
+-          `${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+-        ).then((r) => r.json());
+-        const debugResp = await fetch(
+-          `${CONFIG.GOOGLE_SCRIPT_URL}?debugResolve=1&access_token=${encodeURIComponent(signInResp.access_token)}`
+-        ).then((r) => r.json());
++        const roleResp = await fetch(CONFIG.ADMIN_API_URL, {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ action: "resolveRole", access_token: signInResp.access_token }),
++        }).then((r) => r.json());
+ 
+         const ok = roleResp.role === "OD" && roleResp.isAdmin === true;
+         checkRoleResult.style.background = ok ? "#e6f4ea" : "#fce8e6";
+         checkRoleResult.style.border = "1px solid " + (ok ? "#34a853" : "#ea4335");
+-        checkRoleResult.textContent = "RESULT: " + JSON.stringify(roleResp) + "\nDEBUG: " + JSON.stringify(debugResp);
++        checkRoleResult.textContent = "RESULT: " + JSON.stringify(roleResp);
+       } catch (e) {
+         checkRoleResult.style.background = "#fce8e6";
+         checkRoleResult.style.border = "1px solid #ea4335";
+diff --git a/bulk-import-managers.html b/bulk-import-managers.html
+index ac11cbc..8001151 100644
+--- a/bulk-import-managers.html
++++ b/bulk-import-managers.html
+@@ -32,7 +32,7 @@
+   <p class="hint">
+     Creates <strong id="totalCount">…</strong> Manager accounts from the validated employee list.
+     Sign in with your own Admin email/password below — nothing you type here is sent anywhere
+-    except directly to your own Apps Script and Supabase project.
++    except directly to your own Supabase project.
+   </p>
+ 
+   <form id="setupForm">
+@@ -78,7 +78,7 @@
+       return btoa(unescape(encodeURIComponent(String(value))));
+     }
+ 
+-    // Mirrors Code.gs's generateDefaultPassword(): first letter of each of
++    // Mirrors the admin-api Edge Function's generateDefaultPassword(): first letter of each of
+     // the first three whitespace-separated name parts, uppercased, + "_123!"
+     // (e.g. "Abbasova Irina Vladimirovna" -> "AIV_123!"), so every imported
+     // manager gets a password unique to them instead of one shared default.
+@@ -195,9 +195,9 @@
+             email: b64Encode(row.email),
+             password: b64Encode(generatedPassword),
+           };
+-          const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
++          const resp = await fetch(CONFIG.ADMIN_API_URL, {
+             method: "POST",
+-            headers: { "Content-Type": "text/plain;charset=utf-8" },
++            headers: { "Content-Type": "application/json" },
+             body: JSON.stringify(body),
+           }).then((r) => r.json());
+ 
+diff --git a/bulk-reset-passwords.html b/bulk-reset-passwords.html
+index befd496..e003b88 100644
+--- a/bulk-reset-passwords.html
++++ b/bulk-reset-passwords.html
+@@ -33,7 +33,7 @@
+     first letter of each of the first three name parts + <code>_123!</code> (e.g. "Abbasova Irina
+     Vladimirovna" → <code>AIV_123!</code>) — replacing the single shared password every account
+     was previously given. Sign in with your own Admin email/password below — nothing you type
+-    here is sent anywhere except directly to your own Apps Script and Supabase project.
++    here is sent anywhere except directly to your own Supabase project.
+   </p>
+ 
+   <form id="setupForm">
+@@ -67,7 +67,7 @@
+   <script>
+     const supabaseClient = window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY);
+ 
+-    // Mirrors Code.gs's generateDefaultPassword(): first letter of each of
++    // Mirrors the admin-api Edge Function's generateDefaultPassword(): first letter of each of
+     // the first three whitespace-separated name parts, uppercased, + "_123!"
+     // (e.g. "Abbasova Irina Vladimirovna" -> "AIV_123!").
+     function generateDefaultPassword(fullName) {
+@@ -186,9 +186,9 @@
+             email: b64Encode(row.email),
+             password: b64Encode(generateDefaultPassword(row.full_name)),
+           };
+-          const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
++          const resp = await fetch(CONFIG.ADMIN_API_URL, {
+             method: "POST",
+-            headers: { "Content-Type": "text/plain;charset=utf-8" },
++            headers: { "Content-Type": "application/json" },
+             body: JSON.stringify(body),
+           }).then((r) => r.json());
+ 
+diff --git a/index.html b/index.html
+index 25215c9..48e44f0 100644
+--- a/index.html
++++ b/index.html
+@@ -99,7 +99,7 @@
+   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+   <script src="js/config.js"></script>
+   <script src="js/supabase-client.js"></script>
+-  <script src="js/google.js"></script>
++  <script src="js/backend.js"></script>
+   <script src="js/auth.js"></script>
+   <script src="js/password-toggle.js"></script>
+   <script src="js/app.js"></script>
+diff --git a/js/admin/admin-api.js b/js/admin/admin-api.js
+index 36c8d37..e0cf88a 100644
+--- a/js/admin/admin-api.js
++++ b/js/admin/admin-api.js
+@@ -3,8 +3,8 @@
+  * ---------------------------------------------------------------------------
+  * Data layer for the Admin Panel, backed by Supabase — reads go straight to
+  * Postgres (RLS-gated: an Admin's own `users_read`/`admin_permissions` read
+- * policies allow this), writes go through the Apps Script Web App
+- * (js/google.js), which is the only thing holding the service_role key
++ * policies allow this), writes go through the admin-api Edge Function
++ * (js/backend.js), which is the only thing holding the service_role key
+  * needed to also manage the matching Supabase Auth user (email/password).
+  *
+  * Every function keeps the exact shape admin-app.js/admin-table.js/
+@@ -14,7 +14,8 @@
+  */
+ 
+ // users.role stores the lowercase DB form ('manager'/'hrbp'/'od_team' — see
+-// ADMIN_ENTITY_CONFIG's dbRole in constants.js and Code.gs's ROLE_TO_DB);
++// ADMIN_ENTITY_CONFIG's dbRole in constants.js and the Edge Function's
++// ROLE_TO_DB);
+ // the client (sessionStorage, guardPage, this UI) uses the capitalized form
+ // throughout. Only listAdminProfiles()/getEmployeeById() need this reverse
+ // lookup — listEmployees() already knows its role from the caller.
+diff --git a/js/admin/admin-app.js b/js/admin/admin-app.js
+index 1b3305b..b3ce73a 100644
+--- a/js/admin/admin-app.js
++++ b/js/admin/admin-app.js
+@@ -138,7 +138,7 @@ function toggleEmployeeActive(role, row, table) {
+ function openCreateEmployeeModal(role, table) {
+   const config = ADMIN_ENTITY_CONFIG[role];
+   // New accounts start with a per-employee default password generated
+-  // server-side from their name (set server-side — see Code.gs's
++  // server-side from their name (set server-side — see the admin-api Edge Function's
+   // generateDefaultPassword()) instead of one the Admin types in here.
+   const createFields = config.fields.filter((field) => field.type !== "password");
+   openFormModal({
+diff --git a/js/admin/admin-table.js b/js/admin/admin-table.js
+index 1670a06..79f1f31 100644
+--- a/js/admin/admin-table.js
++++ b/js/admin/admin-table.js
+@@ -375,7 +375,7 @@ function buildRowActions(actions) {
+ }
+ 
+ /**
+- * Mirrors Code.gs's generateDefaultPassword(): first letter of each of the
++ * Mirrors the admin-api Edge Function's generateDefaultPassword(): first letter of each of the
+  * first three whitespace-separated name parts, uppercased, + "_123!" (e.g.
+  * "Abbasova Irina Vladimirovna" -> "AIV_123!"). Parenthetical asides (a
+  * former/maiden name some employees' full_name carries, e.g. "(ex.
+@@ -396,11 +396,11 @@ function computeDefaultPassword(fullName) {
+  *
+  * IMPORTANT: this app never stores or fetches a real password anywhere —
+  * Supabase Auth hashes it on creation and never returns it again, by
+- * design (see apps-script/Code.gs's file header), and this project
++ * design (see supabase/functions/admin-api/index.ts's file header), and this project
+  * deliberately never stores a plaintext password anywhere to work around
+  * that. What CAN be shown honestly, with nothing new stored, is each
+  * account's DEFAULT password — deterministic from full_name (see
+- * computeDefaultPassword() above, mirroring Code.gs's server-side
++ * computeDefaultPassword() above, mirroring the admin-api Edge Function's server-side
+  * generateDefaultPassword()), which is exactly what Supabase Auth was given
+  * at account creation unless an Admin has since changed it via Edit. It's
+  * labeled "Default", not "Current", for exactly that reason: if the
+diff --git a/js/admin/constants.js b/js/admin/constants.js
+index 46498dd..2b12a7f 100644
+--- a/js/admin/constants.js
++++ b/js/admin/constants.js
+@@ -18,9 +18,9 @@
+ // now — that component is shared app-wide (Manager/HRBP/OD pages use it
+ // too), and those pages don't load this Admin-Panel-specific file.
+ 
+-// Display-only explanation of Code.gs's generateDefaultPassword() rule,
++// Display-only explanation of the admin-api Edge Function's generateDefaultPassword() rule,
+ // shown in the Create modal so the Admin knows what to tell a new hire — the
+-// actual password is always computed and set server-side (see Code.gs) from
++// actual password is always computed and set server-side (see the admin-api Edge Function) from
+ // the full name just entered in this form, never sent by this client.
+ const DEFAULT_PASSWORD_RULE_DISPLAY =
+   'New accounts start with a default password generated from their name — the first letter of each of the first three name parts, uppercased, + "_123!" (e.g. "Abbasova Irina Vladimirovna" → AIV_123!). Change it later from this employee’s Edit screen if needed.';
+diff --git a/js/auth.js b/js/auth.js
+index eaf4cce..bb28ad3 100644
+--- a/js/auth.js
++++ b/js/auth.js
+@@ -4,17 +4,17 @@
+  * The app's Authentication Service — every page's ONLY entry point for
+  * signing in, signing out, and checking who's logged in as what. Pages and
+  * other scripts call the functions listed under "Exposes" below and never
+- * touch supabaseClient or Code.gs directly for auth purposes; that
+- * indirection is what makes it possible to swap the underlying provider
+- * later without touching any page, route guard, or business logic — only
+- * this file's internals would change.
++ * touch supabaseClient or the admin-api Edge Function directly for auth
++ * purposes; that indirection is what makes it possible to swap the
++ * underlying provider later without touching any page, route guard, or
++ * business logic — only this file's internals would change.
+  *
+  * Current provider: Supabase Auth (supabaseClient, from supabase-client.js)
+  * verifies the password; this file never persists one anywhere itself.
+  * Role/authorization data (which of Managers/HRBPs/OD/Admins an account
+- * belongs to) lives in Supabase Postgres, read through Code.gs (google.js)
+- * using the session's own access token — see resolveAccountRole() in both
+- * google.js and apps-script/Code.gs.
++ * belongs to) lives in Supabase Postgres, read through the admin-api Edge
++ * Function (js/backend.js) using the session's own access token — see
++ * resolveAccountRole() in both js/backend.js and the Edge Function itself.
+  *
+  * TEMPORARY: while CONFIG.DEV_MODE_DEFAULT_PASSWORD_AUTH is true (see
+  * js/config.js), loginWithPassword() takes a second path — a shared
+@@ -30,7 +30,7 @@
+  * role looked up to decide where to send them and what to store in
+  * sessionStorage. There is no self-service account creation or password
+  * reset anywhere in this app — only the Admin Panel can create accounts or
+- * set/change a password (see apps-script/Code.gs's adminCreateEmployee /
++ * set/change a password (see the admin-api Edge Function's adminCreateEmployee /
+  * adminUpdateEmployee).
+  *
+  * Session state is kept in sessionStorage under "email", "role",
+@@ -92,7 +92,7 @@ function validateEmail(email) {
+ /**
+  * Validates that a password was actually entered. Just an emptiness check
+  * — the real rule-check happens server-side when an Admin sets a password
+- * (see checkPasswordRules() / Code.gs's checkPasswordRulesServer()), not
++ * (see checkPasswordRules() / the admin-api Edge Function's checkPasswordRulesServer()), not
+  * at Sign In.
+  *
+  * @param {string} password
+@@ -184,7 +184,7 @@ async function loginWithPassword(email, password) {
+ 
+ /**
+  * The real (non-temporary) credential check: Supabase Auth verifies the
+- * password, then resolveAccountRole() (google.js / Code.gs) looks up the
++ * password, then resolveAccountRole() (backend.js / the admin-api Edge Function) looks up the
+  * account's role using the resulting session token. Supabase deliberately
+  * doesn't distinguish "wrong password" from "no such account" (avoids
+  * confirming which emails exist), so this doesn't set notFound on a failed
+diff --git a/js/google.js b/js/backend.js
+similarity index 52%
+rename from js/google.js
+rename to js/backend.js
+index fc1dcab..ee8c5f9 100644
+--- a/js/google.js
++++ b/js/backend.js
+@@ -1,32 +1,28 @@
+ /**
+- * google.js
++ * backend.js
+  * ---------------------------------------------------------------------------
+- * Handles all communication with the Google Apps Script Web App that acts
+- * as this app's privileged server — the only thing holding the Supabase
+- * service_role key. Credentials themselves are handled entirely by
+- * Supabase Auth (see supabase-client.js, auth.js); this file never sees a
+- * password, only an already-issued session access token.
++ * The app's ONLY channel to the privileged backend — the Supabase Edge
++ * Function `admin-api` (supabase/functions/admin-api/index.ts), which holds
++ * the service_role key and is therefore the one place allowed to create
++ * accounts, set passwords, and grant Admin permission.
+  *
+- * Scope: sign-in role resolution, and Admin Panel user CRUD (create/update/
+- * delete a Manager/HRBP/OD, grant/revoke Admin, activate/deactivate). The
+- * Structural Change Request workflow does NOT go through this file or Apps
+- * Script at all — it needs no elevated privilege, so it calls Supabase
+- * directly (RLS-gated Postgres functions) from js/request-service.js.
+- *
+- * Server-side verification: Apps Script is deployed with "Anyone" access,
+- * so its URL alone grants no protection — anyone who has it (it's visible
+- * in js/config.js) could otherwise call it directly. Every function here
+- * that touches real account data attaches the caller's current Supabase
+- * access token, which Code.gs verifies server-side
+- * (GET {SUPABASE_URL}/auth/v1/user) before doing anything — see
+- * getAccessToken() below.
++ * Replaces js/google.js, which called a Google Apps Script Web App. Nothing
++ * about the app's shape changed — same function names, same arguments, same
++ * return values — only the host. The move was forced by the corporate
++ * network: Azerconnect blocks the `google-app-script-base` application at
++ * the proxy, so script.google.com was unreachable for every user and sign-in
++ * itself failed with "Unable to reach the authorization service". The Edge
++ * Function answers on the same *.supabase.co origin the app already uses for
++ * Auth, which the network already permits.
+  *
+  * Exposes:
++ *   - getAccessToken() -> the current Supabase session's access token
+  *   - resolveAccountRole(accessToken) -> the verified caller's role
+  *     (Admin/Manager/HRBP/OD), used right after a successful sign-in
+  *
+  * Admin Panel writes (all require the caller to already be signed in as an
+- * Admin — Code.gs re-verifies this server-side, never trusts the client):
++ * Admin — the Edge Function re-verifies this server-side, never trusts the
++ * client):
+  *   - adminCreateEmployee(role, fields)
+  *   - adminUpdateEmployee(role, id, fields)
+  *   - adminDeleteEmployee(role, id)
+@@ -36,9 +32,23 @@
+  */
+ 
+ /**
+- * Reads the current Supabase session (if any) and returns its access
+- * token, for attaching to Apps Script requests that need server-side
+- * verification.
++ * The deployed Edge Function's URL. Derived from SUPABASE_URL rather than
++ * configured separately, since every Supabase project serves its functions
++ * at the same fixed path — one less value to keep in sync. CONFIG.ADMIN_API_URL
++ * overrides it if the function is ever hosted somewhere else.
++ *
++ * @returns {string}
++ */
++function getAdminApiUrl() {
++  if (CONFIG.ADMIN_API_URL && !CONFIG.ADMIN_API_URL.startsWith("PASTE_")) {
++    return CONFIG.ADMIN_API_URL;
++  }
++  return `${String(CONFIG.SUPABASE_URL).replace(/\/+$/, "")}/functions/v1/admin-api`;
++}
++
++/**
++ * Reads the current Supabase session (if any) and returns its access token,
++ * for attaching to backend requests that need server-side verification.
+  *
+  * @returns {Promise<string | null>}
+  */
+@@ -53,12 +63,12 @@ async function getAccessToken() {
+ 
+ /**
+  * Base64-encodes a string (UTF-8 safe). Used to obscure the email/password
+- * of the account being created or updated before it's sent to Apps Script —
++ * of the account being created or updated before it's sent to the backend —
+  * some corporate network security tools inspect outgoing requests for a
+  * plaintext "email + password" pair (a known credential-phishing pattern)
+- * and block ones sent to script.google.com, even for this legitimate
+- * first-party request. Code.gs decodes it server-side (see b64Decode there).
+- * Not a security boundary — this endpoint is only ever reached over HTTPS.
++ * and block them even for a legitimate first-party request. The Edge
++ * Function decodes it server-side (see b64Decode there). Not a security
++ * boundary — this endpoint is only ever reached over HTTPS.
+  *
+  * @param {string | undefined} value
+  * @returns {string | undefined}
+@@ -69,44 +79,66 @@ function b64Encode(value) {
+ }
+ 
+ /**
+- * Resolves the ROLE for the already-authenticated caller identified by
+- * accessToken. Called right after supabaseClient.auth.signInWithPassword()
+- * succeeds — a valid access_token already proves the password was correct;
+- * this only answers "what role does this verified person have". Admin
+- * permission is orthogonal to the primary role (never overrides it as the
+- * post-login landing page) — see Code.gs's resolveAccountRole() and
+- * js/auth.js's loginWithPassword()/getIsAdmin().
++ * Shared transport for every backend call. The Edge Function answers all
++ * actions on one POST endpoint and always replies HTTP 200 with the outcome
++ * in the body, so a non-200 here means the request never reached the
++ * handler (network, deploy, or platform problem) — worth a distinct message
++ * from a handler that ran and refused.
+  *
+- * @param {string} accessToken
+- * @returns {Promise<{authorized: boolean, role: string | null, isAdmin: boolean}>}
+- * @throws {Error} if the network request fails or the response is invalid.
++ * @param {object} body - must include an "action" key.
++ * @param {string} serviceLabel - what to call the backend in error messages,
++ *   so a failure during sign-in doesn't mention the "admin service".
++ * @returns {Promise<object>} the parsed JSON response.
++ * @throws {Error} if the request can't be sent or the response can't be read.
+  */
+-async function resolveAccountRole(accessToken) {
+-  if (!CONFIG.GOOGLE_SCRIPT_URL || CONFIG.GOOGLE_SCRIPT_URL.startsWith("PASTE_")) {
++async function postBackendAction(body, serviceLabel) {
++  if (!CONFIG.SUPABASE_URL || CONFIG.SUPABASE_URL.startsWith("PASTE_")) {
+     throw new Error(
+-      "GOOGLE_SCRIPT_URL is not configured. Update js/config.js with your deployed Apps Script URL."
++      "SUPABASE_URL is not configured. Update js/config.js with your Supabase project URL."
+     );
+   }
+ 
+-  const url = `${CONFIG.GOOGLE_SCRIPT_URL}?resolveRole=1&access_token=${encodeURIComponent(accessToken || "")}`;
+-
+   let response;
+   try {
+-    response = await fetch(url, { method: "GET", redirect: "follow" });
++    response = await fetch(getAdminApiUrl(), {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify(body),
++    });
+   } catch (networkError) {
+-    throw new Error("Unable to reach the authorization service. Please check your connection.");
++    throw new Error(`Unable to reach the ${serviceLabel}. Please check your connection.`);
+   }
+ 
+   if (!response.ok) {
+-    throw new Error(`Authorization service returned an error (HTTP ${response.status}).`);
++    throw new Error(`The ${serviceLabel} returned an error (HTTP ${response.status}).`);
+   }
+ 
+-  let data;
+   try {
+-    data = await response.json();
++    return await response.json();
+   } catch (parseError) {
+-    throw new Error("Authorization service returned an unexpected response.");
++    throw new Error(`The ${serviceLabel} returned an unexpected response.`);
+   }
++}
++
++/**
++ * Asks the backend what role the holder of this access token has. The token
++ * is verified server-side (the client's own claim about who it is, or
++ * whether it's an Admin, is never trusted).
++ *
++ * Returns the PRIMARY role and the Admin permission separately — Admin is an
++ * extra permission, never a replacement for the primary role (and never the
++ * post-login landing page) — see the Edge Function's resolveAccountRole()
++ * and js/auth.js's loginWithPassword()/getIsAdmin().
++ *
++ * @param {string} accessToken
++ * @returns {Promise<{authorized: boolean, role: string | null, isAdmin: boolean}>}
++ * @throws {Error} if the network request fails or the response is invalid.
++ */
++async function resolveAccountRole(accessToken) {
++  const data = await postBackendAction(
++    { action: "resolveRole", access_token: accessToken || "" },
++    "authorization service"
++  );
+ 
+   if (!data || typeof data !== "object" || typeof data.authorized !== "boolean") {
+     throw new Error("Authorization service returned malformed data.");
+@@ -116,53 +148,25 @@ async function resolveAccountRole(accessToken) {
+ }
+ 
+ /**
+- * Shared POST helper for the Admin Panel write actions below. Sends with
+- * Content-Type "text/plain" (not "application/json") so the request stays
+- * a CORS "simple request" and the browser never sends a preflight OPTIONS
+- * request — Apps Script Web Apps cannot answer a CORS preflight. The body
+- * is still valid JSON; Code.gs parses it as JSON regardless of the
+- * declared content type.
++ * Shared helper for the Admin Panel write actions below. Attaches the
++ * caller's access token automatically and turns a refusal by the backend
++ * (status !== "success") into a thrown Error the UI can show.
+  *
+- * @param {object} body - must include an "action" key; the caller's access
+- *   token is attached automatically.
++ * @param {object} body - must include an "action" key.
+  * @returns {Promise<object>} the parsed JSON response.
+- * @throws {Error} if the network request fails, no session exists, or the
+- *   response can't be parsed.
++ * @throws {Error} if no session exists, the request fails, or the action was
++ *   refused.
+  */
+ async function postAdminAction(body) {
+-  if (!CONFIG.GOOGLE_SCRIPT_URL || CONFIG.GOOGLE_SCRIPT_URL.startsWith("PASTE_")) {
+-    throw new Error(
+-      "GOOGLE_SCRIPT_URL is not configured. Update js/config.js with your deployed Apps Script URL."
+-    );
+-  }
+-
+   const accessToken = await getAccessToken();
+   if (!accessToken) {
+     throw new Error("Your session has expired. Please sign in again.");
+   }
+ 
+-  let response;
+-  try {
+-    response = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+-      method: "POST",
+-      headers: { "Content-Type": "text/plain;charset=utf-8" },
+-      body: JSON.stringify(Object.assign({}, body, { access_token: accessToken })),
+-      redirect: "follow",
+-    });
+-  } catch (networkError) {
+-    throw new Error("Unable to reach the admin service. Please check your connection.");
+-  }
+-
+-  if (!response.ok) {
+-    throw new Error(`Admin service returned an error (HTTP ${response.status}).`);
+-  }
+-
+-  let data;
+-  try {
+-    data = await response.json();
+-  } catch (parseError) {
+-    throw new Error("Admin service returned an unexpected response.");
+-  }
++  const data = await postBackendAction(
++    Object.assign({}, body, { access_token: accessToken }),
++    "admin service"
++  );
+ 
+   if (!data || data.status !== "success") {
+     throw new Error((data && data.message) || "The request could not be completed.");
+diff --git a/js/config.js b/js/config.js
+index fa451c2..f993731 100644
+--- a/js/config.js
++++ b/js/config.js
+@@ -4,10 +4,10 @@
+  * Central configuration file for the Organizational Design Tool.
+  *
+  * This is the ONLY file you should need to edit with your own project
+- * values (Google Apps Script URL, Supabase credentials).
++ * values (Supabase credentials, admin-api Edge Function URL).
+  *
+  * Supabase Auth verifies passwords and issues sessions; Supabase Postgres
+- * (read/written through the Apps Script Web App at GOOGLE_SCRIPT_URL) holds
++ * (read/written through the admin-api Edge Function at ADMIN_API_URL) holds
+  * who's allowed in and what role they have. See js/auth.js for how sign-in
+  * combines the two.
+  * -------------------------------------------------------------------------
+@@ -15,12 +15,26 @@
+ 
+ const CONFIG = {
+   // -------------------------------------------------------------------------
+-  // Google Apps Script Web App URL.
+-  // This is the deployed "exec" URL you get after publishing the Apps
+-  // Script as a Web App (see README / setup guide, Step 4-6).
+-  // Example: "https://script.google.com/macros/s/AKfycb.../exec"
++  // admin-api Edge Function URL — the privileged backend that resolves roles
++  // at sign-in and performs every Admin Panel write (see
++  // supabase/functions/admin-api/index.ts and js/backend.js).
++  //
++  // Every Supabase project serves its functions at
++  // {SUPABASE_URL}/functions/v1/{function name}, so this is just that path
++  // spelled out. js/backend.js derives the same URL from SUPABASE_URL when
++  // this is left empty; it stays here explicitly because the standalone
++  // one-off tools (bootstrap-setup.html, bulk-import-managers.html,
++  // bulk-reset-passwords.html) load only this file and call the endpoint
++  // directly.
++  //
++  // This replaced GOOGLE_SCRIPT_URL, which pointed at a Google Apps Script
++  // Web App. Azerconnect's network blocks the `google-app-script-base`
++  // application at the proxy, which made script.google.com unreachable for
++  // every user and broke sign-in itself — not just the Admin Panel. Edge
++  // Functions live on the *.supabase.co origin the app already uses for
++  // Auth, so they inherit access the browser demonstrably has.
+   // -------------------------------------------------------------------------
+-  GOOGLE_SCRIPT_URL: "https://script.google.com/macros/s/AKfycbw-CNzbL8ipYqJibYMvfiv2aINX65e_CzIL3D6eAOnSREtO1BbNhoLd4a6uzT5CPWIB/exec",
++  ADMIN_API_URL: "https://mkgkbqjvywhiginhjyjn.supabase.co/functions/v1/admin-api",
+ 
+   // -------------------------------------------------------------------------
+   // Supabase project credentials — Project Settings > API in your
+@@ -28,11 +42,10 @@ const CONFIG = {
+   // browser (it has no special privileges by itself); never put a
+   // service_role key in this file.
+   //
+-  // These same two values also need to be pasted into
+-  // apps-script/Code.gs (SUPABASE_URL / SUPABASE_ANON_KEY near the top)
+-  // — Apps Script runs on Google's servers, not in this browser bundle,
+-  // so it can't read this file. Code.gs uses them to verify a caller's
+-  // Supabase access token server-side before returning account data.
++  // The admin-api Edge Function needs neither of these pasted anywhere:
++  // Supabase injects SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY into the
++  // function's environment automatically, which is also why the
++  // service_role key never appears in this repository.
+   // -------------------------------------------------------------------------
+   SUPABASE_URL: "https://mkgkbqjvywhiginhjyjn.supabase.co",
+   SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1rZ2ticWp2eXdoaWdpbmhqeWpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0OTU5NTcsImV4cCI6MjEwMTA3MTk1N30.bbgpjDQRMKm77L9EKn9u_0531oZWiQfrnS556sWDjGU",
+diff --git a/js/password-rules.js b/js/password-rules.js
+index d3feef5..eb6bb3f 100644
+--- a/js/password-rules.js
++++ b/js/password-rules.js
+@@ -4,7 +4,7 @@
+  * Password rule checking — the one place that defines what "valid" means
+  * for an Admin-set password, shared between the client-side check in
+  * js/admin/admin-modal.js and the server-side re-check in
+- * apps-script/Code.gs's checkPasswordRulesServer() (kept in sync
++ * the admin-api Edge Function's checkPasswordRulesServer() (kept in sync
+  * deliberately; never trust the client-side check alone).
+  *
+  * Rules:
+diff --git a/supabase/functions/admin-api/README.md b/supabase/functions/admin-api/README.md
+new file mode 100644
+index 0000000..ed2ad78
+--- /dev/null
++++ b/supabase/functions/admin-api/README.md
+@@ -0,0 +1,90 @@
++# admin-api
++
++The privileged backend for the Organizational Design Tool: sign-in role
++resolution and every Admin Panel write (create/update/delete an employee,
++grant or revoke Admin, activate or deactivate an account).
++
++It replaces the Google Apps Script Web App that used to live at
++`apps-script/Code.gs`. Azerconnect's corporate proxy blocks the
++`google-app-script-base` application, so `script.google.com` was unreachable
++for every user on the network — which broke sign-in itself, not just the
++Admin Panel, since role resolution went through it. This function answers on
++the same `*.supabase.co` origin the app already uses for Supabase Auth.
++
++The logic is a faithful port: same action names, same request and response
++shapes, same server-side checks. `js/backend.js` is its only caller in the
++app (plus the three standalone one-off tools, which call it directly).
++
++## Deploy
++
++Both paths need the Supabase project's owner/admin access. Nothing else has
++to be configured: Supabase injects `SUPABASE_URL` and
++`SUPABASE_SERVICE_ROLE_KEY` into the function's environment automatically,
++which is why the service_role key appears nowhere in this repository.
++
++### Option A — Supabase CLI
++
++```bash
++npm install -g supabase          # or: brew install supabase/tap/supabase
++supabase login
++supabase link --project-ref mkgkbqjvywhiginhjyjn
++supabase functions deploy admin-api --no-verify-jwt
++```
++
++### Option B — Dashboard (no local tooling)
++
++Dashboard → **Edge Functions** → **Deploy a new function** → **Via editor**,
++name it exactly `admin-api`, paste the contents of `index.ts`, deploy, then
++turn **Verify JWT with legacy secret** OFF in the function's settings.
++
++### Why `--no-verify-jwt`
++
++The platform's JWT gate is deliberately not used, for two reasons:
++
++1. This function verifies the caller's token itself, against Supabase's own
++   `/auth/v1/user` endpoint, and re-checks `admin_permissions` server-side
++   for every admin action. That check is the real gate and it cannot be
++   skipped by anything a client sends.
++2. `bootstrapAdmin` must be callable with no session at all — there is no
++   Admin to authenticate as the first time it runs.
++
++Turning it off does not make the function open: an unauthenticated caller
++gets `{"authorized": false}` or `{"status": "error", "message":
++"Unauthorized."}` and nothing else.
++
++## Verify a deploy
++
++```bash
++curl -X POST https://mkgkbqjvywhiginhjyjn.supabase.co/functions/v1/admin-api \
++  -H "Content-Type: application/json" \
++  -d '{"action":"resolveRole","access_token":"not-a-real-token"}'
++```
++
++Expected: `{"authorized":false}`. That single response proves the function is
++deployed, reachable from this network, answering without a platform JWT, and
++correctly refusing an invalid token.
++
++Then sign in through `index.html`. A real account should land on its own
++dashboard, and an account with Admin permission should be able to open
++`admin.html`.
++
++## Bootstrap (only when no Admin exists at all)
++
++`bootstrap-setup.html` seeds the first Admin. It is gated by a `BOOTSTRAP_KEY`
++secret you set yourself, and refuses to run once any `admin_permissions` row
++exists:
++
++```bash
++supabase secrets set BOOTSTRAP_KEY=<a secret you choose>
++# ... run bootstrap-setup.html ...
++supabase secrets unset BOOTSTRAP_KEY
++```
++
++Granting Admin to an account that already exists does not need this — use the
++Admin Panel's Grant Admin button, or one SQL statement:
++
++```sql
++insert into admin_permissions (auth_user_id, is_admin, granted_at)
++select id, true, now() from auth.users where email = 'someone@azerconnect.az'
++on conflict (auth_user_id) do update set is_admin = true, granted_at = now();
++```
+diff --git a/supabase/functions/admin-api/index.ts b/supabase/functions/admin-api/index.ts
+new file mode 100644
+index 0000000..e93016b
+--- /dev/null
++++ b/supabase/functions/admin-api/index.ts
+@@ -0,0 +1,848 @@
++/**
++ * admin-api (Supabase Edge Function)
++ * ---------------------------------------------------------------------------
++ * Authorization + Admin Panel backend for the Organizational Design Tool.
++ *
++ * Replaces the Google Apps Script Web App this app used to call
++ * (apps-script/Code.gs, deleted). The logic is a faithful port — same
++ * actions, same request/response shapes, same server-side checks — only the
++ * host changed. The move was forced by the corporate network: Azerconnect
++ * blocks the `google-app-script-base` application at the proxy, so
++ * script.google.com was unreachable for EVERY user, not just Admins, which
++ * made sign-in itself impossible. This function lives on the same
++ * *.supabase.co origin the app already talks to for Auth, so it inherits
++ * whatever access the browser already has to Supabase.
++ *
++ * WHY A SERVER AT ALL: creating accounts, changing passwords and granting
++ * Admin permission need Supabase's service_role key, which must never reach
++ * a browser. This function holds it (from the environment, never in source)
++ * and performs those writes only after verifying the caller.
++ *
++ * The Structural Change Request workflow (requests / request_answers /
++ * request_history) does NOT go through here — those writes need no elevated
++ * privilege and the browser calls Postgres functions directly under Row
++ * Level Security (see js/request-service.js and
++ * supabase/migrations/0004_request_workflow_rpcs.sql). This function's scope
++ * is exactly: sign-in role resolution, and Admin Panel user CRUD.
++ *
++ * AUTHENTICATION ARCHITECTURE (passwords live in Supabase Auth, never here):
++ * this function never stores or compares a raw password — Admin Panel writes
++ * hand it straight to Supabase Auth's Admin API (GoTrue), which hashes it.
++ * Nothing in the app database ever holds a password or a hash.
++ *
++ * SERVER-SIDE VERIFICATION: deployed with --no-verify-jwt, so a caller's
++ * email/role/id can never be trusted just because they claim it. Every
++ * action except bootstrapAdmin requires an `access_token` (a Supabase
++ * session token from a successful signInWithPassword() — see js/auth.js);
++ * getVerifiedUser() confirms it with Supabase itself before anything
++ * happens, and every admin* action additionally confirms that verified user
++ * has an admin_permissions row (requireAdmin()) — the isAdmin flag a client
++ * sends is never trusted.
++ *
++ * Why --no-verify-jwt rather than letting the platform gate it: this
++ * function verifies tokens itself (as above, exactly as Code.gs did), and
++ * bootstrapAdmin must be callable with no session at all — there is no
++ * Admin yet the first time it runs.
++ *
++ * ENVIRONMENT (Edge Functions inject the first two automatically — nothing
++ * to configure):
++ *   SUPABASE_URL               - the project URL.
++ *   SUPABASE_SERVICE_ROLE_KEY  - full database + Auth admin access.
++ *   BOOTSTRAP_KEY              - OPTIONAL, and only for the one-time seed
++ *                                path. Set it as a secret solely while
++ *                                running bootstrapAdmin, then delete it;
++ *                                while unset, bootstrap is disabled.
++ *
++ * Actions (POST, JSON body, `action` selects the handler):
++ *   - resolveRole         { access_token }
++ *       -> { authorized: true, role: "Manager"|"HRBP"|"OD"|"Admin", isAdmin }
++ *          { authorized: false }
++ *       Admin permission is orthogonal to the primary role and never
++ *       overrides it; "Admin" is the role itself only for an account with
++ *       Admin permission and no Manager/HRBP/OD row at all. A deactivated
++ *       (is_active = false) account resolves as unauthorized.
++ *   - adminCreateEmployee { role, full_name, job_title, email, password,
++ *                           company?, division?, department?, subdepartment?,
++ *                           unit?, subunit?, access_token }
++ *   - adminUpdateEmployee { role, id, ...same optional fields, access_token }
++ *   - adminDeleteEmployee { role, id, access_token }
++ *   - adminSetPermission  { auth_user_id, is_admin, access_token }
++ *   - adminSetActive      { role, id, is_active, access_token }
++ *   - bootstrapAdmin      { bootstrap_key, employees: [...] }
++ *       One-time seed, gated by BOOTSTRAP_KEY instead of an admin session.
++ *       Refuses to run once ANY admin_permissions row exists — a stronger
++ *       guard than Code.gs's "used once" flag, and one that needs no stored
++ *       state: the condition it protects is precisely "no Admin exists yet".
++ * ---------------------------------------------------------------------------
++ */
++
++const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
++const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
++
++// Any origin may call: every action authenticates by bearer token and
++// re-checks permissions server-side, so the calling page's origin grants
++// nothing on its own. This also keeps the app working from a file:// page,
++// a local dev server, and wherever it is eventually hosted, without a
++// redeploy for each.
++const CORS_HEADERS = {
++  "Access-Control-Allow-Origin": "*",
++  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
++  "Access-Control-Allow-Methods": "POST, OPTIONS",
++};
++
++// Role name (as used throughout the client/session, e.g. sessionStorage,
++// guardPage()) <-> the value stored in users.role. Kept as an explicit
++// mapping at this one boundary rather than changing the client's role
++// vocabulary, so nothing outside this file needs to know the DB uses
++// lowercase/underscored values.
++const ROLE_TO_DB: Record<string, string> = { Manager: "manager", HRBP: "hrbp", OD: "od_team" };
++const DB_TO_ROLE: Record<string, string> = { manager: "Manager", hrbp: "HRBP", od_team: "OD" };
++const ROLE_NAMES = Object.keys(ROLE_TO_DB);
++
++// Extra fields accepted from the client beyond the shared full_name/
++// job_title/email/company, whitelisted per role so a caller can never write
++// an unexpected column just by naming it in the request body.
++const ROLE_EXTRA_FIELDS: Record<string, string[]> = {
++  Manager: ["division", "department", "subdepartment", "unit", "subunit"],
++  HRBP: [],
++  OD: [],
++};
++
++// Extra fields that are REQUIRED (beyond full_name/job_title/email, which
++// are always required) for each role.
++const ROLE_REQUIRED_EXTRA_FIELDS: Record<string, string[]> = {
++  Manager: ["division", "department"],
++  HRBP: [],
++  OD: [],
++};
++
++const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
++
++type VerifiedUser = { email: string; id: string };
++type ActionResult = Record<string, unknown>;
++
++// =============================================================================
++// Request routing
++// =============================================================================
++
++Deno.serve(async (request: Request): Promise<Response> => {
++  if (request.method === "OPTIONS") {
++    return new Response("ok", { headers: CORS_HEADERS });
++  }
++
++  if (request.method !== "POST") {
++    return json({ status: "error", message: "Unknown request." });
++  }
++
++  let body: Record<string, any>;
++  try {
++    body = await request.json();
++  } catch {
++    return json({ status: "error", message: "Invalid request body." });
++  }
++
++  switch (body.action) {
++    case "resolveRole":
++      return json(await resolveAccountRole(body.access_token));
++    case "adminCreateEmployee":
++      return json(await handleAdminCreateEmployee(body));
++    case "adminUpdateEmployee":
++      return json(await handleAdminUpdateEmployee(body));
++    case "adminDeleteEmployee":
++      return json(await handleAdminDeleteEmployee(body));
++    case "adminSetPermission":
++      return json(await handleAdminSetPermission(body));
++    case "adminSetActive":
++      return json(await handleAdminSetActive(body));
++    case "bootstrapAdmin":
++      return json(await handleBootstrapAdmin(body));
++    default:
++      return json({ status: "error", message: "Unknown action." });
++  }
++});
++
++/**
++ * Every response is HTTP 200 with the outcome in the body, exactly as the
++ * Apps Script version behaved — js/backend.js reads `status`/`authorized`
++ * from the body and treats a non-200 as a transport failure, so handler-level
++ * failures must not surface as HTTP errors.
++ */
++function json(data: unknown): Response {
++  return new Response(JSON.stringify(data), {
++    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
++  });
++}
++
++// =============================================================================
++// Auth verification
++// =============================================================================
++
++/**
++ * Verifies a Supabase access token by asking Supabase itself who it belongs
++ * to, rather than trusting any email/id the caller claims. Fails closed
++ * (returns null) on a missing token, an invalid/expired one, or any network
++ * error.
++ */
++async function getVerifiedUser(accessToken: string | undefined): Promise<VerifiedUser | null> {
++  if (!accessToken) return null;
++  if (!SUPABASE_URL || !SERVICE_ROLE_KEY) return null;
++
++  try {
++    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
++      headers: {
++        Authorization: `Bearer ${accessToken}`,
++        // service_role as the apikey, carried over from the Apps Script
++        // version where the anon key was being rejected on this endpoint.
++        // Safe either way: this only confirms who a token belongs to, and no
++        // elevated action is taken on the strength of the response beyond
++        // that.
++        apikey: SERVICE_ROLE_KEY,
++      },
++    });
++
++    if (!response.ok) return null;
++
++    const user = await response.json();
++    if (!user || !user.email || !user.id) return null;
++
++    return { email: String(user.email).trim().toLowerCase(), id: user.id };
++  } catch {
++    return null;
++  }
++}
++
++/**
++ * Verifies the access token AND that the resulting user has an
++ * admin_permissions row with is_admin = true. This is the gate every
++ * admin* action must pass before touching any data.
++ */
++async function requireAdmin(accessToken: string | undefined): Promise<VerifiedUser | null> {
++  const verifiedUser = await getVerifiedUser(accessToken);
++  if (!verifiedUser) return null;
++
++  const rows = await restGet(
++    "admin_permissions",
++    `auth_user_id=eq.${encodeURIComponent(verifiedUser.id)}&select=is_admin`,
++  );
++  if (!rows || rows.length === 0 || !rows[0].is_admin) return null;
++
++  return verifiedUser;
++}
++
++/**
++ * Decodes a base64 string back to plain text. The browser base64-encodes
++ * email/password/bootstrap_key before sending them — some corporate network
++ * security tools inspect outgoing requests for a plaintext "corporate email
++ * + password" pair (a known credential-phishing pattern) and block them even
++ * for a legitimate first-party request. Encoding avoids that false positive;
++ * it is not a security boundary (this endpoint is only reached over HTTPS).
++ */
++function b64Decode(value: string | undefined): string | undefined {
++  if (value === undefined || value === null || value === "") return value;
++  try {
++    const bytes = Uint8Array.from(atob(String(value)), (char) => char.charCodeAt(0));
++    return new TextDecoder().decode(bytes);
++  } catch {
++    return value; // not valid base64 — pass through unchanged
++  }
++}
++
++// =============================================================================
++// Sign In
++// =============================================================================
++
++/**
++ * Resolves the ROLE for an already-authenticated caller (a valid
++ * access_token means Supabase Auth already confirmed the password — this
++ * only ever answers "what is this verified person allowed to see", never
++ * "is this password correct").
++ *
++ * Admin permission is orthogonal to the primary role, not a replacement for
++ * it: an account with both a users row AND an admin_permissions row gets
++ * back its PRIMARY role plus isAdmin: true as a separate field — Admin never
++ * overrides the primary role as the post-login landing page (see
++ * js/auth.js's loginWithPassword()/ROLE_REDIRECT_MAP and app.js's
++ * guardPage("Admin"), which gates the Admin Panel on the isAdmin flag, not
++ * on role === "Admin"). A deactivated account is treated as unauthorized,
++ * same as a non-existent one — deliberately without a distinct message, so
++ * this endpoint can't be used to probe whether an email is a real, disabled
++ * account.
++ */
++async function resolveAccountRole(accessToken: string | undefined): Promise<ActionResult> {
++  const verifiedUser = await getVerifiedUser(accessToken);
++  if (!verifiedUser) return { authorized: false };
++
++  const adminRows = await restGet(
++    "admin_permissions",
++    `auth_user_id=eq.${encodeURIComponent(verifiedUser.id)}&select=is_admin&limit=1`,
++  );
++  const isAdmin = !!(adminRows && adminRows.length > 0 && adminRows[0].is_admin);
++
++  const userRows = await restGet(
++    "users",
++    `id=eq.${encodeURIComponent(verifiedUser.id)}&select=role,is_active&limit=1`,
++  );
++  if (userRows && userRows.length > 0 && userRows[0].is_active && DB_TO_ROLE[userRows[0].role]) {
++    return { authorized: true, role: DB_TO_ROLE[userRows[0].role], isAdmin };
++  }
++
++  if (isAdmin) {
++    // Admin permission with no primary Manager/HRBP/OD row at all (a
++    // pure-Admin account) — "Admin" is the only role available to land on.
++    return { authorized: true, role: "Admin", isAdmin: true };
++  }
++
++  // A real, password-verified Supabase Auth user with no active users row
++  // and no admin_permissions row — e.g. deleted/deactivated from the Admin
++  // Panel after their session token was issued. Deny; js/auth.js signs them
++  // out.
++  return { authorized: false };
++}
++
++// =============================================================================
++// Admin Panel write actions
++// =============================================================================
++
++/**
++ * Creates a new Manager/HRBP/OD account: a Supabase Auth user (with the
++ * Admin-supplied password) plus the matching "users" row, using the same id
++ * for both. If the table insert fails after the Auth user was created, the
++ * Auth user is deleted again so no orphaned login is left behind.
++ */
++async function handleAdminCreateEmployee(body: Record<string, any>): Promise<ActionResult> {
++  const admin = await requireAdmin(body.access_token);
++  if (!admin) return { status: "error", message: "Unauthorized." };
++
++  const role = body.role;
++  if (ROLE_NAMES.indexOf(role) === -1) {
++    return { status: "error", message: "Unknown role." };
++  }
++
++  const decodedBody = {
++    ...body,
++    email: b64Decode(body.email),
++    password: b64Decode(body.password) || generateDefaultPassword(body.full_name),
++  };
++
++  const validationError = validateEmployeeInput(role, decodedBody, /* passwordRequired */ true);
++  if (validationError) return { status: "error", message: validationError };
++
++  const email = String(decodedBody.email).trim().toLowerCase();
++
++  const authResult = await authAdminCreateUser(email, decodedBody.password);
++  if (authResult.error) {
++    return { status: "error", message: authResult.error };
++  }
++
++  const row = buildEmployeeRow(role, decodedBody, email);
++  row.id = authResult.userId;
++  const insertResult = await restPost("users", row);
++
++  if (insertResult.error) {
++    await authAdminDeleteUser(authResult.userId!); // don't leak a login with no profile
++    return { status: "error", message: friendlyTableError(insertResult.error) };
++  }
++
++  return { status: "success", id: insertResult.data[0].id };
++}
++
++/**
++ * Updates an existing user row. If a new password is supplied, updates the
++ * linked Supabase Auth user's password too; if the email changed, updates
++ * the Auth user's email as well so sign-in keeps matching.
++ */
++async function handleAdminUpdateEmployee(body: Record<string, any>): Promise<ActionResult> {
++  const admin = await requireAdmin(body.access_token);
++  if (!admin) return { status: "error", message: "Unauthorized." };
++
++  const role = body.role;
++  if (ROLE_NAMES.indexOf(role) === -1) {
++    return { status: "error", message: "Unknown role." };
++  }
++  if (!body.id) {
++    return { status: "error", message: "Missing employee id." };
++  }
++
++  const decodedBody = {
++    ...body,
++    email: b64Decode(body.email),
++    password: b64Decode(body.password),
++  };
++
++  const validationError = validateEmployeeInput(role, decodedBody, /* passwordRequired */ false);
++  if (validationError) return { status: "error", message: validationError };
++
++  const existingRows = await restGet("users", `id=eq.${encodeURIComponent(body.id)}&select=email&limit=1`);
++  if (!existingRows || existingRows.length === 0) {
++    return { status: "error", message: "Employee not found." };
++  }
++  const existing = existingRows[0];
++  const newEmail = decodedBody.email ? String(decodedBody.email).trim().toLowerCase() : existing.email;
++
++  if (decodedBody.password || newEmail !== existing.email) {
++    const authUpdate: Record<string, string> = {};
++    if (decodedBody.password) authUpdate.password = decodedBody.password;
++    if (newEmail !== existing.email) authUpdate.email = newEmail;
++
++    const authResult = await authAdminUpdateUser(body.id, authUpdate);
++    if (authResult.error) {
++      return { status: "error", message: authResult.error };
++    }
++  }
++
++  const row = buildEmployeeRow(role, decodedBody, newEmail);
++  const updateResult = await restPatch("users", `id=eq.${encodeURIComponent(body.id)}`, row);
++
++  if (updateResult.error) {
++    return { status: "error", message: friendlyTableError(updateResult.error) };
++  }
++
++  return { status: "success" };
++}
++
++/**
++ * Deletes a user row and its linked Supabase Auth user.
++ */
++async function handleAdminDeleteEmployee(body: Record<string, any>): Promise<ActionResult> {
++  const admin = await requireAdmin(body.access_token);
++  if (!admin) return { status: "error", message: "Unauthorized." };
++
++  if (!body.id) {
++    return { status: "error", message: "Missing employee id." };
++  }
++
++  const existingRows = await restGet("users", `id=eq.${encodeURIComponent(body.id)}&select=id&limit=1`);
++  if (!existingRows || existingRows.length === 0) {
++    return { status: "error", message: "Employee not found." };
++  }
++
++  const deleteResult = await restDelete("users", `id=eq.${encodeURIComponent(body.id)}`);
++  if (deleteResult.error) {
++    return { status: "error", message: friendlyTableError(deleteResult.error) };
++  }
++
++  await authAdminDeleteUser(body.id); // best-effort; the row is already gone either way
++
++  return { status: "success" };
++}
++
++/**
++ * Grants or revokes Admin permission for a Supabase Auth user id. An Admin
++ * may not remove their own permission — otherwise a lone Admin could lock
++ * everyone (including themselves) out with no one left to undo it.
++ */
++async function handleAdminSetPermission(body: Record<string, any>): Promise<ActionResult> {
++  const admin = await requireAdmin(body.access_token);
++  if (!admin) return { status: "error", message: "Unauthorized." };
++
++  const targetUserId = body.auth_user_id;
++  const grantAdmin = !!body.is_admin;
++
++  if (!targetUserId) {
++    return { status: "error", message: "Missing auth_user_id." };
++  }
++  if (!grantAdmin && targetUserId === admin.id) {
++    return { status: "error", message: "You cannot remove your own Admin permission." };
++  }
++
++  const upsertResult = await restPost(
++    "admin_permissions",
++    {
++      auth_user_id: targetUserId,
++      is_admin: grantAdmin,
++      granted_by: admin.id,
++      granted_at: new Date().toISOString(),
++    },
++    { Prefer: "return=representation,resolution=merge-duplicates" },
++  );
++
++  if (upsertResult.error) {
++    return { status: "error", message: friendlyTableError(upsertResult.error) };
++  }
++
++  return { status: "success" };
++}
++
++/**
++ * Activates or deactivates a user. A deactivated account is denied at Sign
++ * In (see resolveAccountRole()) but its Supabase Auth user and users row are
++ * left intact — unlike Delete, this is reversible. An Admin may not
++ * deactivate their own account, for the same lockout reason as
++ * handleAdminSetPermission.
++ */
++async function handleAdminSetActive(body: Record<string, any>): Promise<ActionResult> {
++  const admin = await requireAdmin(body.access_token);
++  if (!admin) return { status: "error", message: "Unauthorized." };
++
++  if (!body.id) {
++    return { status: "error", message: "Missing employee id." };
++  }
++  const setActive = !!body.is_active;
++  if (!setActive && body.id === admin.id) {
++    return { status: "error", message: "You cannot deactivate your own account." };
++  }
++
++  const updateResult = await restPatch("users", `id=eq.${encodeURIComponent(body.id)}`, {
++    is_active: setActive,
++  });
++  if (updateResult.error) {
++    return { status: "error", message: friendlyTableError(updateResult.error) };
++  }
++
++  return { status: "success" };
++}
++
++/**
++ * One-time seed path: creates the given employees as Admins. Gated by the
++ * BOOTSTRAP_KEY secret rather than an admin session, since no Admin exists
++ * yet the first time this runs.
++ *
++ * Code.gs guarded re-runs with a "used once" script property; there is no
++ * equivalent per-function storage here, so the guard asks the database the
++ * question it actually cares about instead: if ANY admin_permissions row
++ * exists, bootstrapping is over and this refuses. Delete the BOOTSTRAP_KEY
++ * secret once you've used this so it can never run again at all.
++ */
++async function handleBootstrapAdmin(body: Record<string, any>): Promise<ActionResult> {
++  const configuredKey = Deno.env.get("BOOTSTRAP_KEY");
++  if (!configuredKey) {
++    return { status: "error", message: "Bootstrap is not enabled (no BOOTSTRAP_KEY secret set)." };
++  }
++
++  const suppliedKey = b64Decode(body.bootstrap_key);
++  if (String(suppliedKey || "") !== configuredKey) {
++    return { status: "error", message: "Invalid bootstrap key." };
++  }
++
++  const existingAdmins = await restGet("admin_permissions", "is_admin=is.true&select=auth_user_id&limit=1");
++  if (existingAdmins && existingAdmins.length > 0) {
++    return { status: "error", message: "Bootstrap has already been used (an Admin already exists)." };
++  }
++
++  if (!Array.isArray(body.employees) || body.employees.length === 0) {
++    return { status: "error", message: "No employees supplied." };
++  }
++
++  const results: ActionResult[] = [];
++  for (const employee of body.employees) {
++    const role = employee.role;
++    if (ROLE_NAMES.indexOf(role) === -1) {
++      results.push({ email: employee.email, status: "error", message: "Unknown role." });
++      continue;
++    }
++
++    const decodedEmployee = {
++      ...employee,
++      email: b64Decode(employee.email),
++      password: b64Decode(employee.password) || generateDefaultPassword(employee.full_name),
++    };
++
++    const validationError = validateEmployeeInput(role, decodedEmployee, /* passwordRequired */ true);
++    if (validationError) {
++      results.push({ email: decodedEmployee.email, status: "error", message: validationError });
++      continue;
++    }
++
++    const email = String(decodedEmployee.email).trim().toLowerCase();
++    const authResult = await authAdminCreateUser(email, decodedEmployee.password);
++    if (authResult.error) {
++      results.push({ email, status: "error", message: authResult.error });
++      continue;
++    }
++
++    const row = buildEmployeeRow(role, decodedEmployee, email);
++    row.id = authResult.userId;
++    const insertResult = await restPost("users", row);
++    if (insertResult.error) {
++      await authAdminDeleteUser(authResult.userId!);
++      results.push({ email, status: "error", message: friendlyTableError(insertResult.error) });
++      continue;
++    }
++
++    const permissionResult = await restPost("admin_permissions", {
++      auth_user_id: authResult.userId,
++      is_admin: true,
++      granted_by: null,
++      granted_at: new Date().toISOString(),
++    });
++    if (permissionResult.error) {
++      results.push({ email, status: "error", message: friendlyTableError(permissionResult.error) });
++      continue;
++    }
++
++    results.push({ email, status: "success" });
++  }
++
++  return { status: "success", results };
++}
++
++// =============================================================================
++// Validation
++// =============================================================================
++
++/**
++ * Validates the shared + role-specific fields for a create/update request.
++ * Returns an error message, or null if valid.
++ */
++function validateEmployeeInput(
++  role: string,
++  input: Record<string, any>,
++  passwordRequired: boolean,
++): string | null {
++  if (!input.full_name || !String(input.full_name).trim()) return "Full name is required.";
++  if (!input.job_title || !String(input.job_title).trim()) return "Job title is required.";
++  if (!input.email || !EMAIL_REGEX.test(String(input.email).trim())) return "A valid email is required.";
++
++  for (const field of ROLE_REQUIRED_EXTRA_FIELDS[role] || []) {
++    if (!input[field] || !String(input[field]).trim()) {
++      return capitalize(field) + " is required.";
++    }
++  }
++
++  if (passwordRequired && !input.password) return "Password is required.";
++  if (input.password && !checkPasswordRulesServer(input.password).allValid) {
++    return "Password must be at least 6 characters and include a letter, a number, and a special character.";
++  }
++
++  return null;
++}
++
++/**
++ * Mirrors js/password-rules.js's checkPasswordRules() — kept in sync
++ * deliberately since this is the server-side re-check for Admin-set
++ * passwords (never trust client-side validation alone).
++ */
++function checkPasswordRulesServer(password: string): { allValid: boolean } {
++  const value = password || "";
++  return {
++    allValid:
++      value.length >= 6 &&
++      /[a-zA-Z]/.test(value) &&
++      /[0-9]/.test(value) &&
++      /[^a-zA-Z0-9]/.test(value),
++  };
++}
++
++function capitalize(text: string): string {
++  return text.charAt(0).toUpperCase() + text.slice(1);
++}
++
++/**
++ * Generates this employee's starting password from their own full_name, so
++ * every newly created account gets a password unique to them instead of one
++ * shared default. Only ever the STARTING password: Supabase Auth hashes and
++ * stores it like any other, and an Admin can overwrite it per-account at any
++ * time via Edit. Only used when the caller supplies no password at all.
++ *
++ * Rule: first letter of each of the first three whitespace-separated name
++ * parts, uppercased, + "_123!" — e.g. "Abbasova Irina Vladimirovna" (the
++ * full_name convention throughout this app is surname first, given name,
++ * then patronymic) -> "AIV_123!". The schema has no separate first/last
++ * columns, so this parses the one full_name field. Parenthetical asides some
++ * names carry (e.g. "Islamova (ex. Allahverdiyeva) Ulviyya Vahid") are
++ * stripped first so they never contribute an initial. Falls back to fewer
++ * initials if fewer than three parts are present — never zero, since
++ * full_name is already required by validateEmployeeInput().
++ */
++function generateDefaultPassword(fullName: string): string {
++  const withoutParens = String(fullName || "").replace(/\([^)]*\)/g, " ");
++  const nameParts = withoutParens.split(/\s+/).filter(Boolean).slice(0, 3);
++  return nameParts.map((part) => part.charAt(0).toUpperCase()).join("") + "_123!";
++}
++
++/**
++ * Builds the row payload to send to PostgREST from a create/update request,
++ * whitelisted to exactly the columns "users" has. Does not set "id" — the
++ * two callers attach it differently (a freshly created Auth user id vs. the
++ * existing row's id in the URL query).
++ */
++function buildEmployeeRow(role: string, input: Record<string, any>, email: string): Record<string, any> {
++  const row: Record<string, any> = {
++    full_name: String(input.full_name).trim(),
++    job_title: String(input.job_title).trim(),
++    email,
++    role: ROLE_TO_DB[role],
++  };
++
++  if (input.company !== undefined) {
++    row.company = input.company === "" ? null : String(input.company).trim();
++  }
++
++  for (const field of ROLE_EXTRA_FIELDS[role] || []) {
++    if (input[field] !== undefined) {
++      row[field] = input[field] === "" ? null : String(input[field]).trim();
++    }
++  }
++
++  return row;
++}
++
++/**
++ * Turns a raw PostgREST error into a message safe/useful to show an Admin,
++ * recognizing the common "unique constraint violated" case (duplicate email).
++ */
++function friendlyTableError(rawMessage: string): string {
++  const text = String(rawMessage || "");
++  if (text.indexOf("duplicate key") !== -1 && text.indexOf("email") !== -1) {
++    return "This email is already in use.";
++  }
++  if (text.indexOf("violates foreign key constraint") !== -1) {
++    return "This person can't be deleted because they have existing requests or history linked to their account. Use the Status toggle to deactivate them instead.";
++  }
++  return "Could not save the record. Please try again.";
++}
++
++// =============================================================================
++// Supabase REST (PostgREST) + Auth Admin API helpers — all use the
++// service_role key, so every response here bypasses Row Level Security.
++// Only ever call these from code that has already checked the CALLER's
++// permissions itself (requireAdmin() / resolveAccountRole() above).
++// =============================================================================
++
++function serviceRoleHeaders(): Record<string, string> {
++  return { apikey: SERVICE_ROLE_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` };
++}
++
++async function restGet(table: string, queryString: string): Promise<any[]> {
++  try {
++    const response = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${queryString}`, {
++      headers: serviceRoleHeaders(),
++    });
++    if (!response.ok) return [];
++    return await response.json();
++  } catch {
++    return [];
++  }
++}
++
++async function restPost(
++  table: string,
++  row: Record<string, any>,
++  extraHeaders?: Record<string, string>,
++): Promise<{ data?: any; error?: string }> {
++  return await writeRequest(`${SUPABASE_URL}/rest/v1/${table}`, "POST", row, extraHeaders);
++}
++
++async function restPatch(
++  table: string,
++  queryString: string,
++  fields: Record<string, any>,
++): Promise<{ data?: any; error?: string }> {
++  return await writeRequest(`${SUPABASE_URL}/rest/v1/${table}?${queryString}`, "PATCH", fields);
++}
++
++async function restDelete(table: string, queryString: string): Promise<{ data?: any; error?: string }> {
++  return await writeRequest(`${SUPABASE_URL}/rest/v1/${table}?${queryString}`, "DELETE");
++}
++
++async function writeRequest(
++  url: string,
++  method: string,
++  payload?: Record<string, any>,
++  extraHeaders?: Record<string, string>,
++): Promise<{ data?: any; error?: string }> {
++  const headers: Record<string, string> = {
++    ...serviceRoleHeaders(),
++    Prefer: "return=representation",
++    ...(extraHeaders || {}),
++  };
++  if (payload) headers["Content-Type"] = "application/json";
++
++  let response: Response;
++  try {
++    response = await fetch(url, {
++      method,
++      headers,
++      body: payload ? JSON.stringify(payload) : undefined,
++    });
++  } catch (error) {
++    return { error: String(error) };
++  }
++
++  const text = await response.text();
++
++  if (!response.ok) {
++    let message = text;
++    try {
++      const parsed = JSON.parse(text);
++      message = parsed.message || parsed.msg || text;
++    } catch {
++      // keep raw text
++    }
++    return { error: message };
++  }
++
++  try {
++    return { data: JSON.parse(text) };
++  } catch {
++    return { data: [] };
++  }
++}
++
++/**
++ * Creates a Supabase Auth user with a password already set and the email
++ * pre-confirmed (Admin-created accounts should be usable immediately, with
++ * no separate email verification step — which also matters because this
++ * project has no custom SMTP configured, so confirmation mail to a
++ * non-project address would never arrive).
++ */
++async function authAdminCreateUser(
++  email: string,
++  password: string,
++): Promise<{ userId?: string; error?: string }> {
++  try {
++    const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
++      method: "POST",
++      headers: { ...serviceRoleHeaders(), "Content-Type": "application/json" },
++      body: JSON.stringify({ email, password, email_confirm: true }),
++    });
++
++    const body = await response.json().catch(() => null);
++
++    if (!response.ok) {
++      const message = (body && (body.msg || body.error_description || body.message)) ||
++        "Could not create account.";
++      return { error: /registered|exists/i.test(message) ? "This email is already in use." : message };
++    }
++
++    return { userId: body.id };
++  } catch (error) {
++    return { error: String(error) };
++  }
++}
++
++async function authAdminUpdateUser(
++  userId: string,
++  fields: Record<string, string>,
++): Promise<{ ok?: true; error?: string }> {
++  try {
++    const response = await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
++      method: "PUT",
++      headers: { ...serviceRoleHeaders(), "Content-Type": "application/json" },
++      body: JSON.stringify(fields),
++    });
++
++    if (!response.ok) {
++      const body = await response.json().catch(() => null);
++      const message = (body && (body.msg || body.error_description || body.message)) ||
++        "Could not update account.";
++      return { error: /registered|exists/i.test(message) ? "This email is already in use." : message };
++    }
++
++    return { ok: true };
++  } catch (error) {
++    return { error: String(error) };
++  }
++}
++
++async function authAdminDeleteUser(userId: string): Promise<void> {
++  try {
++    await fetch(`${SUPABASE_URL}/auth/v1/admin/users/${encodeURIComponent(userId)}`, {
++      method: "DELETE",
++      headers: serviceRoleHeaders(),
++    });
++  } catch {
++    // best-effort, same as the Apps Script version — the caller has already
++    // decided the users row is going away either way
++  }
++}
+diff --git a/unauthorized.html b/unauthorized.html
+index 0643508..6fcf384 100644
+--- a/unauthorized.html
++++ b/unauthorized.html
+@@ -21,7 +21,7 @@
+   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+   <script src="js/config.js"></script>
+   <script src="js/supabase-client.js"></script>
+-  <script src="js/google.js"></script>
++  <script src="js/backend.js"></script>
+   <script src="js/auth.js"></script>
+   <script>
+     // A signed-in user landed here because THIS page wasn't theirs, not
+-- 
+2.43.0
+

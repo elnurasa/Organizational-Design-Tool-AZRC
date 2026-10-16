@@ -1,0 +1,843 @@
+/**
+ * create-request.css
+ * ---------------------------------------------------------------------------
+ * Styles for create-request.html ("New Organization Change Request").
+ * Builds on the design tokens defined in style.css (loaded first) —
+ * only page-specific rules live here.
+ * ---------------------------------------------------------------------------
+ */
+
+body.request-page {
+  min-height: 100vh;
+  background: var(--color-bg);
+  padding-bottom: 96px; /* clears the sticky footer */
+}
+
+/* ---------- Sticky header ---------- */
+.sticky-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 32px;
+  background: var(--banner-gradient);
+  color: #ffffff;
+}
+
+
+.sticky-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo-placeholder.small {
+  width: 40px;
+  height: 40px;
+  font-size: 15px;
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.sticky-header h1 {
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+}
+
+.header-subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* ---------- Progress indicator ---------- */
+.progress-track {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 26px 24px 4px;
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.progress-step .step-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  background: #e3eaf2;
+  color: var(--color-text-muted);
+  transition: background var(--transition-medium), color var(--transition-medium), box-shadow var(--transition-medium);
+}
+
+.progress-step.active .step-dot {
+  background: var(--brand-navy);
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.16);
+}
+
+.progress-step.completed .step-dot {
+  background: var(--brand-green);
+  color: #ffffff;
+}
+
+.progress-step.active,
+.progress-step.completed {
+  color: var(--color-text);
+}
+
+.progress-connector {
+  width: 40px;
+  height: 2px;
+  border-radius: 2px;
+  background: #d6dfea;
+}
+
+/* ---------- Main layout ---------- */
+.request-main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 26px 24px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 30px 32px 34px;
+  animation: card-enter 0.4s ease;
+}
+
+.card h2 {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--brand-navy);
+  margin-bottom: 4px;
+}
+
+.section-subtitle {
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  margin-bottom: 20px;
+}
+
+/* ---------- Manager Information (read-only) ---------- */
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 18px 22px;
+  margin-top: 18px;
+}
+
+.info-field label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.info-field input {
+  width: 100%;
+  padding: 11px 13px;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #f5f8fc;
+  border: 1px solid #e3eaf2;
+  border-radius: var(--radius-md);
+  cursor: not-allowed;
+}
+
+/* ---------- Category selector ---------- */
+.category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.category-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  padding: 22px;
+  background: #ffffff;
+  border: 1.5px solid var(--color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+  font-family: inherit;
+}
+
+.category-card:hover {
+  border-color: var(--navy-200);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px -12px rgba(var(--primary-rgb), 0.28);
+}
+
+.category-card.selected {
+  border-color: var(--brand-navy);
+  background: var(--navy-50);
+  box-shadow: 0 0 0 3px rgba(var(--primary-rgb), 0.12), 0 12px 28px -12px rgba(var(--primary-rgb), 0.3);
+}
+
+.category-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  /* the logo's own navy -> green dot-grid gradient */
+  background: var(--brand-gradient-diagonal);
+}
+
+.category-card h3 {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.category-card p {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  line-height: 1.45;
+}
+
+/* ---------- Dynamic questions ---------- */
+#questions-section {
+  animation: card-enter 0.4s ease;
+}
+
+.questions-placeholder {
+  padding: 22px;
+  border-radius: var(--radius-md);
+  background: var(--navy-50);
+  color: var(--color-text-muted);
+  font-size: 14.5px;
+  text-align: center;
+}
+
+.question-field {
+  padding: 22px 0;
+  border-bottom: 1px solid #edf1f6;
+}
+
+.question-field:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.question-label {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+
+.question-field.field-error .question-label {
+  color: var(--color-error);
+}
+
+.checkbox-group,
+.yes-no-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.checkbox-option,
+.radio-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+
+.checkbox-option input,
+.radio-option input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--brand-navy);
+  cursor: pointer;
+}
+
+.question-textarea,
+.question-text-input {
+  width: 100%;
+  padding: 13px 15px;
+  font-size: 14.5px;
+  font-family: inherit;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.question-textarea:hover,
+.question-text-input:hover {
+  border-color: #a9b9cc;
+}
+
+.question-textarea:focus,
+.question-text-input:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.question-textarea {
+  resize: vertical;
+}
+
+/* ---------- Option picker (questions with predefined options) ----------
+   Three stacked fields: a searchable multi-select dropdown, the chips of
+   what's selected, then the free-text description textarea. */
+.field-caption {
+  margin: 0 0 7px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.option-picker {
+  display: flex;
+  flex-direction: column;
+}
+
+.option-picker-search {
+  position: relative;
+}
+
+.option-picker-input {
+  width: 100%;
+  padding: 12px 42px 12px 15px;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.option-picker-input::placeholder {
+  color: #8a9ab0;
+}
+
+.option-picker-input:hover {
+  border-color: #a9b9cc;
+}
+
+.option-picker-input:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+/* Chevron on the right edge — click toggles the list */
+.option-picker-caret {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.option-picker-caret::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-right: 2px solid var(--color-text-muted);
+  border-bottom: 2px solid var(--color-text-muted);
+  transform: rotate(45deg);
+  transition: transform var(--transition-fast);
+}
+
+.option-picker-search.is-open .option-picker-caret::after {
+  margin-top: 4px;
+  transform: rotate(-135deg);
+}
+
+.option-picker-list {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 16px 36px -10px rgba(6, 36, 32, 0.28);
+}
+
+.option-picker-list.hidden {
+  display: none;
+}
+
+.option-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  font-size: 14.5px;
+  color: var(--color-text);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.option-picker-option:hover,
+.option-picker-option.is-active {
+  background: var(--navy-50);
+}
+
+.option-picker-option.is-selected {
+  font-weight: 600;
+  color: var(--brand-navy);
+}
+
+/* Checkbox indicator — filled navy with a white tick when selected */
+.option-check {
+  position: relative;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #a9b9cc;
+  border-radius: 5px;
+  background: #ffffff;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.option-picker-option.is-selected .option-check {
+  background: var(--brand-navy);
+  border-color: var(--brand-navy);
+}
+
+.option-picker-option.is-selected .option-check::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 4px;
+  height: 9px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.option-picker-empty {
+  padding: 12px;
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+/* The "selected options" field — sits between the dropdown and the textarea */
+.field-caption-spaced {
+  margin-top: 16px;
+}
+
+.option-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: #f5f8fc;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+}
+
+.option-chips-placeholder {
+  font-size: 13.5px;
+  color: #7d8da3;
+}
+
+.option-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--brand-navy);
+  background: rgba(var(--primary-rgb), 0.1);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.option-chip-remove:hover {
+  color: #ffffff;
+  background: var(--brand-navy);
+}
+
+.error-text {
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-error);
+}
+
+/* ---------- Sticky footer actions ---------- */
+.sticky-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 32px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -8px 24px -12px rgba(6, 36, 32, 0.12);
+}
+
+#draft-status {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  flex: 1;
+}
+
+#draft-status.banner-error {
+  color: var(--color-error);
+  font-weight: 500;
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.footer-actions .btn-primary,
+.footer-actions .btn-secondary,
+.footer-actions .btn-tertiary {
+  width: auto;
+  padding: 11px 22px;
+}
+
+.btn-tertiary {
+  padding: 11px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.btn-tertiary:hover {
+  color: var(--color-text);
+  background: #eaeff5;
+}
+
+/* ---------- Business Reason form (Step 1, Section 2) ---------- */
+.justification-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 18px;
+}
+
+.justification-form .form-group {
+  margin-bottom: 0;
+}
+
+.form-field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+}
+
+.field-select {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.field-select:hover {
+  border-color: #a9b9cc;
+}
+
+.field-select:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+/* Multi-line and date inputs inside the justification form match the rest */
+.justification-form textarea,
+.justification-form input[type="date"] {
+  width: 100%;
+  padding: 12px 14px;
+  font-size: 14.5px;
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.justification-form textarea:focus,
+.justification-form input[type="date"]:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.justification-form .form-group label,
+.form-field-row .form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 7px;
+}
+
+/* ---------- Question hints (muted helper bullets below a textarea) ---------- */
+.question-hints {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.question-hints li {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  background: #f1f5fa;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.question-hints li::before {
+  content: "· ";
+}
+
+.char-count {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: right;
+}
+
+.char-count.char-count-ok {
+  color: var(--color-success);
+}
+
+/* ---------- Review step (Step 3) read-only summary ---------- */
+.review-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--brand-navy);
+  margin: 26px 0 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.review-section-title:first-child {
+  margin-top: 0;
+}
+
+.readonly-value {
+  font-size: 14.5px;
+  color: var(--color-text);
+  padding-top: 2px;
+}
+
+.readonly-paragraph {
+  margin-bottom: 18px;
+}
+
+.readonly-paragraph:last-child {
+  margin-bottom: 0;
+}
+
+.readonly-paragraph-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.readonly-paragraph-value {
+  font-size: 14.5px;
+  color: var(--color-text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+/* ---------- Approval trail (history) ---------- */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-left: 4px;
+}
+
+/* Timeline: a brand-coloured dot per entry on a thin connecting rail */
+.history-row {
+  position: relative;
+  padding: 0 0 20px 26px;
+  border-left: 2px solid var(--navy-100);
+  margin-left: 6px;
+}
+
+.history-row::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid var(--brand-navy);
+}
+
+.history-row:last-child {
+  border-left-color: transparent;
+  padding-bottom: 0;
+}
+
+.history-row p {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.history-time {
+  display: block;
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.history-comment {
+  margin-top: 8px;
+  padding: 9px 13px;
+  font-size: 13.5px;
+  font-style: italic;
+  color: #3c4f66;
+  background: #f5f8fc;
+  border-radius: var(--radius-md);
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 640px) {
+  .sticky-header {
+    padding: 14px 16px;
+  }
+
+  .request-main {
+    padding: 16px 16px 32px;
+  }
+
+  .card {
+    padding: 22px 20px;
+  }
+
+  .progress-step span:not(.step-dot) {
+    display: none;
+  }
+
+  .sticky-footer {
+    padding: 12px 16px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .footer-actions {
+    justify-content: stretch;
+  }
+
+  .footer-actions button,
+  .footer-actions .btn-tertiary {
+    flex: 1;
+  }
+}
+
+/* ---------- Long unbroken text (e.g. pasted strings) must wrap inside its card ---------- */
+.readonly-paragraph-value,
+.readonly-value,
+.history-comment,
+.review-answer-text,
+.answer-description,
+.review-question-text,
+.info-field input {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}

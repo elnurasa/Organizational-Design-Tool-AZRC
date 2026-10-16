@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Bulk Import: Manager Accounts</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 20px; }
+  p.hint { color: #555; font-size: 14px; }
+  label { display: block; margin-top: 14px; font-weight: bold; font-size: 14px; }
+  input { width: 100%; padding: 8px; font-size: 14px; box-sizing: border-box; margin-top: 4px; }
+  button { margin-top: 22px; padding: 10px 18px; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: 0.6; cursor: default; }
+  #summary { margin-top: 20px; padding: 14px; border-radius: 6px; font-size: 14px; white-space: pre-wrap; display: none; }
+  #summary.ok { background: #e6f4ea; border: 1px solid #34a853; }
+  #summary.err { background: #fce8e6; border: 1px solid #ea4335; }
+  #progressWrap { margin-top: 16px; display: none; }
+  #progressBarOuter { background: #eee; border-radius: 6px; height: 18px; overflow: hidden; }
+  #progressBarInner { background: #2f5fed; height: 100%; width: 0%; transition: width 0.2s; }
+  #progressText { font-size: 13px; color: #555; margin-top: 6px; }
+  table { border-collapse: collapse; width: 100%; margin-top: 16px; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 8px; text-align: left; }
+  th { background: #f5f7fa; }
+  tr.status-success td.status-cell { color: #1a7a3a; font-weight: bold; }
+  tr.status-error td.status-cell { color: #c0392b; font-weight: bold; }
+  #resultsWrap { max-height: 420px; overflow-y: auto; margin-top: 10px; display: none; }
+  #downloadBtn { display: none; }
+</style>
+</head>
+<body>
+  <h1>Bulk Import: Manager Accounts</h1>
+  <p class="hint">
+    Creates <strong id="totalCount">…</strong> Manager accounts from the validated employee list.
+    Sign in with your own Admin email/password below — nothing you type here is sent anywhere
+    except directly to your own Apps Script and Supabase project.
+  </p>
+
+  <form id="setupForm">
+    <label for="email">Your Admin Email</label>
+    <input id="email" type="email" required />
+
+    <label for="password">Your Admin Password</label>
+    <input id="password" type="password" autocomplete="off" required />
+
+    <button type="submit" id="startBtn">Start Import</button>
+  </form>
+
+  <div id="progressWrap">
+    <div id="progressBarOuter"><div id="progressBarInner"></div></div>
+    <div id="progressText"></div>
+  </div>
+
+  <div id="summary"></div>
+
+  <button id="downloadBtn" type="button">Download Credentials (CSV)</button>
+
+  <div id="resultsWrap">
+    <table>
+      <thead>
+        <tr><th>Full Name</th><th>Email</th><th>Company</th><th>Status</th></tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+  </div>
+
+  <script src="js/config.js"></script>
+  <script>
+    let ROWS = [];
+    let credentialsCsv = "Full Name,Email,Password,Company\n";
+
+    fetch("managers_import_data.json").then((r) => r.json()).then((data) => {
+      ROWS = data;
+      document.getElementById("totalCount").textContent = ROWS.length;
+    });
+
+    function b64Encode(value) {
+      if (value === undefined || value === null || value === "") return value;
+      return btoa(unescape(encodeURIComponent(String(value))));
+    }
+
+    // Mirrors Code.gs's generateDefaultPassword(): first letter of each of
+    // the first three whitespace-separated name parts, uppercased, + "_123!"
+    // (e.g. "Abbasova Irina Vladimirovna" -> "AIV_123!"), so every imported
+    // manager gets a password unique to them instead of one shared default.
+    function generateDefaultPassword(fullName) {
+      const withoutParens = String(fullName || "").replace(/\([^)]*\)/g, " ");
+      const nameParts = withoutParens.split(/\s+/).filter(Boolean).slice(0, 3);
+      const initials = nameParts.map((part) => part.charAt(0).toUpperCase()).join("");
+      return initials + "_123!";
+    }
+
+    function sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    const form = document.getElementById("setupForm");
+    const startBtn = document.getElementById("startBtn");
+    const progressWrap = document.getElementById("progressWrap");
+    const progressBarInner = document.getElementById("progressBarInner");
+    const progressText = document.getElementById("progressText");
+    const summaryBox = document.getElementById("summary");
+    const resultsWrap = document.getElementById("resultsWrap");
+    const resultsBody = document.getElementById("resultsBody");
+    const downloadBtn = document.getElementById("downloadBtn");
+
+    downloadBtn.addEventListener("click", () => {
+      const blob = new Blob([credentialsCsv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "manager-credentials.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (ROWS.length === 0) {
+        alert("Employee data hasn't loaded yet. Wait a moment and try again.");
+        return;
+      }
+
+      startBtn.disabled = true;
+      startBtn.textContent = "Signing in…";
+      summaryBox.style.display = "none";
+      resultsWrap.style.display = "block";
+      progressWrap.style.display = "block";
+      resultsBody.innerHTML = "";
+
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+
+      let accessToken;
+      try {
+        const signInResp = await fetch(`${CONFIG.SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+          method: "POST",
+          headers: { apikey: CONFIG.SUPABASE_ANON_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ email: email, password: password }),
+        }).then((r) => r.json());
+        if (!signInResp.access_token) {
+          throw new Error(signInResp.error_description || signInResp.msg || "Sign-in failed.");
+        }
+        accessToken = signInResp.access_token;
+      } catch (e) {
+        startBtn.disabled = false;
+        startBtn.textContent = "Start Import";
+        summaryBox.className = "err";
+        summaryBox.style.display = "block";
+        summaryBox.textContent = "Could not sign in: " + e.message;
+        return;
+      }
+
+      startBtn.textContent = "Importing…";
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < ROWS.length; i++) {
+        const row = ROWS[i];
+        const pct = Math.round(((i + 1) / ROWS.length) * 100);
+        progressBarInner.style.width = pct + "%";
+        progressText.textContent = `${i + 1} / ${ROWS.length} — ${row.full_name}`;
+
+        const generatedPassword = generateDefaultPassword(row.full_name);
+
+        const tr = document.createElement("tr");
+        const tdName = document.createElement("td");
+        tdName.textContent = row.full_name;
+        const tdEmail = document.createElement("td");
+        tdEmail.textContent = row.email;
+        const tdCompany = document.createElement("td");
+        tdCompany.textContent = row.company;
+        const tdStatus = document.createElement("td");
+        tdStatus.className = "status-cell";
+        tdStatus.textContent = "Working…";
+        tr.appendChild(tdName);
+        tr.appendChild(tdEmail);
+        tr.appendChild(tdCompany);
+        tr.appendChild(tdStatus);
+        resultsBody.appendChild(tr);
+
+        try {
+          const body = {
+            action: "adminCreateEmployee",
+            access_token: accessToken,
+            role: "Manager",
+            full_name: row.full_name,
+            job_title: row.job_title,
+            company: row.company,
+            division: row.division,
+            department: row.department,
+            subdepartment: row.subdepartment || "",
+            unit: row.unit || "",
+            subunit: row.subunit || "",
+            email: b64Encode(row.email),
+            password: b64Encode(generatedPassword),
+          };
+          const resp = await fetch(CONFIG.GOOGLE_SCRIPT_URL, {
+            method: "POST",
+            headers: { "Content-Type": "text/plain;charset=utf-8" },
+            body: JSON.stringify(body),
+          }).then((r) => r.json());
+
+          if (resp.status === "success") {
+            successCount++;
+            tr.className = "status-success";
+            tdStatus.textContent = "Created";
+            credentialsCsv += `"${row.full_name}","${row.email}","${generatedPassword}","${row.company}"\n`;
+            downloadBtn.style.display = "inline-block";
+          } else {
+            failCount++;
+            tr.className = "status-error";
+            tdStatus.textContent = "Failed: " + (resp.message || "Unknown error");
+          }
+        } catch (e) {
+          failCount++;
+          tr.className = "status-error";
+          tdStatus.textContent = "Failed: " + e.message;
+        }
+
+        await sleep(350);
+      }
+
+      startBtn.textContent = "Import Complete";
+      summaryBox.className = failCount === 0 ? "ok" : "err";
+      summaryBox.style.display = "block";
+      summaryBox.textContent = `Done. ${successCount} created, ${failCount} failed out of ${ROWS.length}.` +
+        (successCount > 0 ? "\n\nClick \"Download Credentials (CSV)\" to save the generated passwords — this is the only copy, so save it now." : "");
+    });
+  </script>
+</body>
+</html>

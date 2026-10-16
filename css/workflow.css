@@ -1,0 +1,544 @@
+/**
+ * workflow.css
+ * ---------------------------------------------------------------------------
+ * Shared styles for the Structural Change Request workflow pages (Manager's
+ * request list, HRBP/OD inboxes and review pages) — everything that isn't
+ * specific to the Admin Panel's sidebar layout (css/admin.css) or the
+ * stepped request form itself (css/create-request.css). Builds on the
+ * tokens in style.css and reuses admin.css's data-table/modal/toast/badge
+ * classes, which are generic enough to serve both.
+ * ---------------------------------------------------------------------------
+ */
+
+/* ---------- Simple topbar shell (no sidebar) — Manager/HRBP/OD pages ---------- */
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 32px;
+  background: var(--banner-gradient);
+  color: #ffffff;
+}
+
+
+.app-topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-topbar-title {
+  padding-left: 14px;
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.005em;
+  color: #ffffff;
+  border-left: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.app-topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 13.5px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.app-topbar-user strong {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.app-topbar-user .btn-secondary {
+  width: auto;
+  padding: 8px 16px;
+}
+
+.app-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 36px 32px 56px;
+}
+
+.content-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+
+.content-header-row .content-heading {
+  margin-bottom: 0;
+}
+
+.content-header-row .btn-primary {
+  width: auto;
+  padding: 11px 22px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.back-to-list-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--brand-navy);
+  text-decoration: none;
+  margin-bottom: 16px;
+}
+
+.back-to-list-link:hover {
+  color: var(--brand-navy-dark);
+  text-decoration: underline;
+}
+
+/* Badge variants (info / warning / danger) live in admin.css beside the
+   base .badge so every page — including the Admin Panel — shares them. */
+
+/* ---------- Empty states ---------- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 64px 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.empty-state-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26px;
+  background: var(--navy-50);
+  border: 1px solid var(--navy-100);
+}
+
+.empty-state h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.empty-state p {
+  font-size: 14px;
+  max-width: 380px;
+}
+
+/* ---------- Skeleton loaders ---------- */
+.skeleton-row {
+  height: 16px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #e8eef5 25%, #f6f9fc 37%, #e8eef5 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+
+.skeleton-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ---------- Review page layout (HRBP / OD review, Manager view mode) ---------- */
+.review-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.review-meta-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 32px;
+  padding: 18px 24px;
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--brand-navy);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  font-size: 14px;
+}
+
+.review-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.review-meta-item .review-meta-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+}
+
+.review-answer-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: 22px 24px;
+}
+
+.review-answer-card + .review-answer-card {
+  margin-top: 14px;
+}
+
+.review-question-text {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--color-text);
+  margin-bottom: 12px;
+}
+
+.review-answer-text {
+  font-size: 14.5px;
+  color: var(--color-text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  padding: 13px 16px;
+  background: #f5f8fc;
+  border: 1px solid #e6edf5;
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+
+/* ---------- Selected-option chips (request form picker + every read-only
+   place an answer is shown: review step, view mode, HRBP/OD review) ---------- */
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 12px;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--brand-navy);
+  background: #ffffff;
+  border: 1px solid var(--navy-200);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(6, 36, 32, 0.06);
+}
+
+.option-chip-readonly {
+  padding: 5px 12px;
+  background: var(--navy-50);
+  box-shadow: none;
+}
+
+.answer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.answer-chips:last-child {
+  margin-bottom: 0;
+}
+
+.answer-description {
+  display: block;
+}
+
+/* ---------- Per-question "History" toggle (insufficient verdicts from
+   earlier rounds, before the requester's edit replaced the answer) ----------
+   Lives on the question it belongs to — manager's request view, HRBP's and
+   OD's review pages, interactive or read-only — instead of a separate list,
+   so whoever is already reading that question can open its history right
+   there. Collapsed by default; buildQuestionHistoryToggle() in
+   workflow-shared.js toggles [hidden] and aria-expanded, this file only
+   styles the two states. A question with many rounds stays a one-line
+   button until opened, so it scans the same whether it has 1 round or 50. */
+.q-history {
+  margin-top: 12px;
+}
+
+.q-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #9a4707;
+  background: #fff8ec;
+  border: 1px solid rgba(217, 119, 6, 0.3);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.q-history-toggle:hover {
+  background: #fdefd7;
+  border-color: rgba(217, 119, 6, 0.5);
+}
+
+.q-history-caret {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--transition-fast);
+}
+
+.q-history-toggle[aria-expanded="true"] .q-history-caret {
+  transform: rotate(45deg);
+}
+
+.q-history-panel {
+  margin-top: 10px;
+  border-left: 2px solid rgba(217, 119, 6, 0.3);
+  padding-left: 16px;
+}
+
+.q-history-panel[hidden] {
+  display: none;
+}
+
+.q-history-entry {
+  padding: 4px 0 16px;
+}
+
+.q-history-entry:not(:last-child) {
+  border-bottom: 1px dashed #edf1f6;
+  margin-bottom: 16px;
+}
+
+.q-history-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.q-history-entry-who {
+  font-size: 12.5px;
+  color: var(--color-text-muted);
+}
+
+.q-history-answer {
+  font-style: italic;
+  color: var(--color-text-muted);
+}
+
+.verdict-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.verdict-toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.verdict-toggle {
+  padding: 8px 18px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: #ffffff;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.verdict-toggle:hover {
+  background: var(--navy-50);
+  color: var(--color-text);
+}
+
+.verdict-toggle + .verdict-toggle {
+  border-left: 1px solid var(--color-border-strong);
+}
+
+.verdict-toggle.verdict-sufficient.is-active {
+  background: var(--color-success);
+  color: #ffffff;
+}
+
+.verdict-toggle.verdict-insufficient.is-active {
+  background: var(--color-error);
+  color: #ffffff;
+}
+
+.verdict-readonly-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 5px 13px;
+  border-radius: 999px;
+}
+
+.verdict-comment-field {
+  margin-top: 10px;
+}
+
+.verdict-comment-field textarea {
+  width: 100%;
+  padding: 11px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  line-height: 1.5;
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  resize: vertical;
+  outline: none;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.verdict-comment-field textarea:focus {
+  border-color: var(--brand-navy);
+  box-shadow: var(--focus-ring);
+}
+
+.prior-comment-note {
+  margin-top: 10px;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  border-radius: var(--radius-md);
+  background: #fff8ec;
+  border: 1px solid rgba(217, 119, 6, 0.28);
+  border-left: 3px solid #d97706;
+  color: #7c3a06;
+}
+
+.review-summary-card {
+  background: #ffffff;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 22px 26px;
+}
+
+.review-decision-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 32px;
+  margin: 22px -32px -56px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--color-border);
+  box-shadow: 0 -8px 24px -12px rgba(6, 36, 32, 0.12);
+}
+
+.review-decision-bar .decision-status-text {
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+}
+
+.review-decision-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.review-decision-actions button {
+  width: auto;
+  padding: 11px 22px;
+}
+
+/* ---------- Responsive (tablet) ---------- */
+@media (max-width: 900px) {
+  .app-topbar {
+    padding: 13px 18px;
+  }
+
+  .app-content {
+    padding: 22px 16px 40px;
+  }
+
+  .review-decision-bar {
+    flex-direction: column;
+    align-items: stretch;
+    margin: 22px -16px -40px;
+    padding: 14px 16px;
+  }
+
+  .review-decision-actions {
+    justify-content: stretch;
+  }
+
+  .review-decision-actions button {
+    flex: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .app-topbar-title {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-topbar-user span {
+    display: none;
+  }
+}
+
+/* =============================================================================
+   Unopened ("new") requests in the HRBP and OD inboxes
+   -----------------------------------------------------------------------------
+   Deliberately light, like an unread email: the row stays white and only gets
+   a small blue dot before its ID and bolder text. The blue "NEW" badge and
+   Review button come from the status colours. Once opened, the row is plain.
+   ============================================================================= */
+.data-table tbody tr.row-unopened td {
+  font-weight: 600;
+  color: #12263f;
+}
+
+.data-table tbody tr.row-unopened td:nth-child(2)::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: #1d5c9e;
+}

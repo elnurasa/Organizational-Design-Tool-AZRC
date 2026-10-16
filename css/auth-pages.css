@@ -1,0 +1,14 @@
+/**
+ * auth-pages.css
+ * ---------------------------------------------------------------------------
+ * Small additions to the login-card/form-group/btn-primary system already
+ * defined in style.css (loaded first), for pages that aren't the main Sign
+ * In form. Currently just unauthorized.html's full-width "Back" button.
+ * ---------------------------------------------------------------------------
+ */
+
+.full-width-link {
+  width: 100%;
+  display: flex;
+  text-decoration: none;
+}

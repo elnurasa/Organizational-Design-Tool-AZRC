@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review Request · Organizational Design Tool</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/admin.css" />
+  <link rel="stylesheet" href="css/workflow.css" />
+  <link rel="stylesheet" href="css/create-request.css" />
+  <link rel="stylesheet" href="css/living.css" />
+</head>
+<body class="request-page">
+
+  <header class="app-topbar">
+    <div class="app-topbar-left">
+      <img src="logo-white.png" alt="Azerconnect Group" class="topbar-logo" />
+      <span class="app-topbar-title">Organizational Design Tool</span>
+    </div>
+    <div class="app-topbar-user">
+      <span>Signed in as <strong id="user-email">-</strong></span>
+      <button type="button" id="logout-button" class="btn-secondary">Log Out</button>
+    </div>
+  </header>
+
+  <main class="app-content" id="review-main">
+    <a href="od.html" class="back-to-list-link">← OD Inbox</a>
+    <div id="page-loading">
+      <div class="skeleton-card">
+        <div class="skeleton-row" style="width: 35%;"></div>
+        <div class="skeleton-row" style="width: 85%;"></div>
+        <div class="skeleton-row" style="width: 70%;"></div>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast-container" class="toast-container"></div>
+  <div id="modal-root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/request-questions.js"></script>
+  <script src="js/request-service.js"></script>
+  <script src="js/workflow-shared.js"></script>
+  <script src="js/admin/admin-toast.js"></script>
+  <script src="js/admin/admin-modal.js"></script>
+  <script src="js/pdf-export.js"></script>
+  <script src="js/od-review.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", initOdReviewPage);
+  </script>
+  <script src="js/living-effects.js"></script>
+</body>
+</html>
